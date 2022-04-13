@@ -37,18 +37,35 @@ def run():
 
     elif str(sys.argv[1])=="--interactive":
         main()
-    elif str(sys.argv[1])=="--i":
-        main()
-    elif str(sys.argv[1])=="--d2b":
-        main()
     elif str(sys.argv[1])=="-interactive":
+        main()
+    elif str(sys.argv[1])=="--i":
         main()
     elif str(sys.argv[1])=="-i":
         main()
     elif str(sys.argv[1])=="/interactive":
-        main()
+        usage()
     elif str(sys.argv[1])=="/i":
-        main()
+        usage()
+
+    elif str(sys.argv[1])=="--ipmasktobin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="--ipmask2bin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="--im2b":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="-ipmasktobin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="-ipmask2bin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="-im2b":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="/ipmasktobin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="/ipmask2bin":
+        ipandmasktobin()
+    elif str(sys.argv[1])=="/im2b":
+        ipandmasktobin()
 
     elif str(sys.argv[1])=="--iptobin":
         iptobin()
@@ -163,42 +180,23 @@ def run():
         hextodec()
     elif str(sys.argv[1])=="/h2d":
         hextodec()
-
-    elif str(sys.argv[1])=="--ipmasktobin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="--ipmask2bin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="--ipmask2b":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="-ipmasktobin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="-ipmask2bin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="-ipmask2b":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="/ipmasktobin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="/ipmask2bin":
-        ipandmasktobin()
-    elif str(sys.argv[1])=="/ipmask2b":
-        ipandmasktobin()
     
     else:
-        print("\033[0;31mAn unexpected error has been caused.\033[00m")
+        print("\033[0;31mAn unexpected error was caused..\033[00m")
         exit(1)
 
 def usage():
-    print("Usage: python3 main.py OPTIONS")
+    print("Usage: python3 main.py OPTION")
     print("")
     print("OPTIONS:")
-    print("     --help, --usage, -h: Display this help message.")
+    print("     --help, --usage, -h: display this help message.")
     print("     -i, --i: interactive mode.")
     print("")
     print("ARGS:")
-    print("     --ipmasktobin ip_addr/cidr: ip address and mask to binary conversion.")
+    print("     --ipmasktobin ip_address/cidr: ip address and mask to binary conversion.")
     print("")    
-    print("     --iptobin ip_addr: ip address to binary conversion.")
-    print("     --bintoip binary_number: IP address in binary to decimal conversion.")
+    print("     --iptobin ip_address: ip address to binary conversion.")
+    print("     --bintoip binary_number: ip address in binary to decimal conversion.")
     print("")
     print("     --dectobin decimal_number: decimal to binary conversion.")
     print("     --bintodec binary_number: binary to decimal conversion.")
@@ -207,7 +205,7 @@ def usage():
     print("     --hextodec hexa_number: hexa to decimal conversion.")
     print("")
     print("EXAMPLES:")
-    print("     python3 ./main.py --iptobin 192.168.0.1")
+    print("     python3 ./main.py --ipmasktobin 192.168.0.1/24")
     print("     python3 ./main.py --dectobin 250")
     exit(0)
 
@@ -215,69 +213,78 @@ def clear():
     os.system('cls' if os.name=='nt' else 'clear')
 
 def dectobin():
-    if len(sys.argv)<3:
-        dec_value=input("Input a decimal number: ")
+    if len(sys.argv)==2:
+        dec_value=input("Enter a decimal number: ")
         dec_value=int(dec_value)
-
         bin_value=bin(dec_value)[2:]
         bin_complement_value=format(dec_value, '#010b')[2:]
 
-        print("Initial value (decimal):",dec_value)
         print("")
+        print("Initial value (decimal):",dec_value)
         print("Binary value:",bin_value)
-        print("Binary signed 2s complement:",bin_complement_value)
+        print("Signed binary number value:",bin_complement_value)
     
     elif len(sys.argv)==3:
         dec_value=int(sys.argv[2])
-
+        dec_value=int(dec_value)
         bin_value=bin(dec_value)[2:]
         bin_complement_value=format(dec_value, '#010b')[2:]
 
         print("Initial value (decimal):",dec_value)
-        print("")
         print("Binary value:",bin_value)
-        print("Binary signed 2s complement:",bin_complement_value) 
+        print("Signed binary number value:",bin_complement_value)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        exit(1)
 
 def bintodec(): 
-    if len(sys.argv)<3:
+    if len(sys.argv)==2:
         bin_value=input("Input a binary number: ")
-
         new_bin_value="0b"+bin_value
         dec_value=int(new_bin_value, 2)
 
+        print("")
         print("Initial value (binary):",bin_value)
         print("Decimal value:",dec_value)
     
     elif len(sys.argv)==3:
         bin_value=(sys.argv[2])
-
         new_bin_value="0b"+bin_value
         dec_value=int(new_bin_value, 2)
 
         print("Initial value (binary):",bin_value)
-        print("")
         print("Decimal value:",dec_value)
 
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        exit(1)
+
 def dectohex():
-    if len(sys.argv)<3:
+    if len(sys.argv)==2:
         dec_value=input("Input a decimal number: ")
         dec_value=int(dec_value)
-
         hex_value=hex(dec_value)[2:]
 
-        print("Initial value (decimal):",dec_value)
         print("")
-        print("Hexa value:",hex_value)
+        print("Initial value (decimal):",dec_value)
+        print("Hex value:",hex_value)
     
     elif len(sys.argv)==3:
         dec_value=int(sys.argv[2])
-        
         dec_value=int(dec_value)
         hex_value=hex(dec_value)[2:]
 
         print("Initial value (decimal):",dec_value)
-        print("")
-        print("Hexa value:",hex_value)
+        print("Hex value:",hex_value)
 
 def hextodec():
     if len(sys.argv)<3:
@@ -336,7 +343,7 @@ def iptobin():
         print("Initial value (IP in decimal):",ip)
         print("")
         print("Binary value:",final_bin_value)
-        print("Binary signed 2s complement:",final_bin_complement_value)
+        print("Signed binary number value:",final_bin_complement_value)
 
     elif len(sys.argv)==3:
         ip=(sys.argv[2])
@@ -372,7 +379,7 @@ def iptobin():
         print("Initial value (IP in decimal):",ip)
         print("")
         print("Binary value:",final_bin_value)
-        print("Binary signed 2s complement:",final_bin_complement_value)
+        print("Signed binary number value:",final_bin_complement_value)
 
 def bintoip():
     if len(sys.argv)<3:
@@ -709,7 +716,7 @@ def main():
         exit(0)
     
     else:
-        print("\033[0;31mAn unexpected error has been caused.\033[00m")
+        print("\033[0;31mAn unexpected error was caused..\033[00m")
         exit(1)
 
 if __name__ == "__main__":
