@@ -1,10 +1,10 @@
-from ast import If
+import sys
+from sys import exit
+from sys import argv
 import os
 from os import system
 import ctypes
-from sys import exit
-from sys import argv
-import sys
+from ast import If
 
 def run():
     if len(sys.argv)==1:
@@ -52,19 +52,19 @@ def run():
         ipandmasktobin()
     elif str(sys.argv[1])=="--ipmask2bin":
         ipandmasktobin()
-    elif str(sys.argv[1])=="--im2b":
+    elif str(sys.argv[1])=="--ipm2b":
         ipandmasktobin()
     elif str(sys.argv[1])=="-ipmasktobin":
         ipandmasktobin()
     elif str(sys.argv[1])=="-ipmask2bin":
         ipandmasktobin()
-    elif str(sys.argv[1])=="-im2b":
+    elif str(sys.argv[1])=="-ipm2b":
         ipandmasktobin()
     elif str(sys.argv[1])=="/ipmasktobin":
         ipandmasktobin()
     elif str(sys.argv[1])=="/ipmask2bin":
         ipandmasktobin()
-    elif str(sys.argv[1])=="/im2b":
+    elif str(sys.argv[1])=="/ipm2b":
         ipandmasktobin()
 
     elif str(sys.argv[1])=="--iptobin":
@@ -182,7 +182,7 @@ def run():
         hextodec()
     
     else:
-        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
 
 def usage():
@@ -193,24 +193,24 @@ def usage():
     print("     -i, --i: interactive mode.")
     print("")
     print("ARGS:")
-    print("     --ipmasktobin ip_address/cidr: ip address and mask to binary conversion.")
+    print("     --ipmasktobin IP/CIDR: convert an IP address and its mask (or CIDR) into a binary number.")
     print("")    
-    print("     --iptobin ip_address: ip address to binary conversion.")
-    print("     --bintoip binary_number: ip address in binary to decimal conversion.")
+    print("     --iptobin IP: convert an IP address to a binary number.")
+    print("     --bintoip binary-number: convert an IP address in binary format to decimal format.")
     print("")
-    print("     --dectobin decimal_number: decimal to binary conversion.")
-    print("     --bintodec binary_number: binary to decimal conversion.")
+    print("     --dectobin decimal-number: convert a decimal number into a binary number.")
+    print("     --bintodec binary-number: convert a binary number into a decimal number.")
     print("")
-    print("     --dectohex decimal_number: decimal to hexa conversion.")
-    print("     --hextodec hexa_number: hexa to decimal conversion.")
+    print("     --dectohex decimal-number: convert a decimal number into a hexadecimal number.")
+    print("     --hextodec hexa_number: convert a hexadecimal number into a decimal number.")
     print("")
     print("EXAMPLES:")
-    print("     python3 ./main.py --ipmasktobin 192.168.0.1/24")
-    print("     python3 ./main.py --dectobin 250")
+    print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
+    print("     python3 ./main.py --dectobin 42")
     exit(0)
 
 def clear():
-    os.system('cls' if os.name=='nt' else 'clear')
+    os.system("cls" if os.name=="nt" else "clear")
 
 def dectobin():
     if len(sys.argv)==2:
@@ -239,12 +239,12 @@ def dectobin():
         exit(1)
 
     else:
-        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
 
 def bintodec(): 
     if len(sys.argv)==2:
-        bin_value=input("Input a binary number: ")
+        bin_value=input("Enter a binary number: ")
         new_bin_value="0b"+bin_value
         dec_value=int(new_bin_value, 2)
 
@@ -265,18 +265,18 @@ def bintodec():
         exit(1)
 
     else:
-        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
 
 def dectohex():
     if len(sys.argv)==2:
-        dec_value=input("Input a decimal number: ")
+        dec_value=input("Enter a decimal number: ")
         dec_value=int(dec_value)
         hex_value=hex(dec_value)[2:]
 
         print("")
         print("Initial value (decimal):",dec_value)
-        print("Hex value:",hex_value)
+        print("Hexadecimal value:",hex_value)
     
     elif len(sys.argv)==3:
         dec_value=int(sys.argv[2])
@@ -284,42 +284,52 @@ def dectohex():
         hex_value=hex(dec_value)[2:]
 
         print("Initial value (decimal):",dec_value)
-        print("Hex value:",hex_value)
+        print("Hexadecimal value:",hex_value)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
 
 def hextodec():
-    if len(sys.argv)<3:
-        hex_value=input("Input a hexa number: ")
-
+    if len(sys.argv)==2:
+        hex_value=input("Enter a hexadecimal number: ")
         new_hex_value="0x"+hex_value
         dec_value=int(new_hex_value, 16)
 
-        print("Initial value (hexa):",hex_value)
         print("")
+        print("Initial value (hexadecimal):",hex_value)
         print("Decimal value:",dec_value)
     
     elif len(sys.argv)==3:
         hex_value=(sys.argv[2])
-
         new_hex_value="0x"+hex_value
         dec_value=int(new_hex_value, 16)
 
         print("Initial value (hexa):",hex_value)
-        print("")
         print("Decimal value:",dec_value)
 
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
 def iptobin():
-    if len(sys.argv)<3:
+    if len(sys.argv)==2:
         ip=input("Input a IP address: ")
         addr=[0,0,0,0]
         addr=ip
         addr=[int(x) for x in addr.split(".")]
 
-        if len(addr)<4:
-            print("\033[0;31mAn IP address must be coded on 4 bytes.\033[00m")
-            print("")
-            input("Please press the Enter key to proceed.")
-            print("")
-            iptobin()
+    if len(addr)<4:
+        print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+        exit(1)
     
         First_Byte_dec=addr[0]
         Second_Byte_dec=addr[1]
@@ -716,7 +726,7 @@ def main():
         exit(0)
     
     else:
-        print("\033[0;31mAn unexpected error was caused..\033[00m")
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
 
 if __name__ == "__main__":
