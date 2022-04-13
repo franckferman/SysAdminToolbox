@@ -163,6 +163,9 @@ def run():
         hextodec()
     elif str(sys.argv[1])=="/h2d":
         hextodec()
+
+    elif str(sys.argv[1])=="-ip":
+        ipandmasktobin()
     
     else:
         print("\033[0;31mAn unexpected error has been caused.\033[00m")
@@ -424,6 +427,80 @@ def bintoip():
         print("")
         print("Decimal value:",final_dec_value)
 
+def ipandmasktobin():
+    if len(sys.argv)<3:
+        ipandmask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
+        
+        addr=[0,0,0,0]
+        addr=ipandmask
+        cidr=0
+
+    if '/' in ipandmask:
+        (addr, cidr)=ipandmask.split('/')
+
+        addr=[int(x) for x in addr.split(".")]
+        cidr=int(cidr)
+        mask=[ (((1<<32)-1) << (32-cidr) >> i ) & 255 for i in reversed(range(0, 32, 8)) ]
+    elif not '/' in ipandmask:
+        (addr, mask)=ipandmask.split(' ')
+
+        addr=[int(x) for x in addr.split(".")]
+        mask= [int(x) for x in mask.split(".")]
+        cidr=sum((bin(x).count('1') for x in mask))
+   
+    else:
+        print("\033[0;31mNo valid arguments were detected.\033[00m")
+        print("")
+        print("Example of a valid argument: <ip/cidr>")
+        print("Example of a valid argument: <ip> <mask>")
+        exit(1)
+
+    First_Addr_Byte_dec=addr[0]
+    Second_Addr_Byte_dec=addr[1]
+    Third_Addr_Byte_dec=addr[2]
+    Fourth_Addr_Byte_dec=addr[3]
+    
+    First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
+    Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
+    Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
+    Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+    
+    final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
+    
+    First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
+    Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
+    Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
+    Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
+    
+    final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
+
+    First_Mask_Byte_dec=mask[0]
+    Second_Mask_Byte_dec=mask[1]
+    Third_Mask_Byte_dec=mask[2]
+    Fourth_Mask_Byte_dec=mask[3]
+    
+    First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
+    Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
+    Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
+    Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
+    
+    final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
+    
+    First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
+    Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
+    Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
+    Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
+    
+    final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
+
+    print("Initial values (IP and mask in decimal):",ipandmask)
+    print("")
+    print("Binary address value:",final_addr_bin_value)
+    print("Binary adress signed 2s complement:",final_addr_bin_complement_value)
+    print("")
+    print("Binary mask value:",final_mask_bin_value)
+    print("Binary mask signed 2s complement:",final_mask_bin_complement_value)
+
 def main():
     clear()
     print("")
@@ -437,16 +514,19 @@ def main():
     print("     ║ │ ││ ││  ├┴┐│ │┌┴┬┘        ")
     print("     ╩ └─┘└─┘┴─┘└─┘└─┘┴ └─        ")
     print("")
-    print("1 - IP to binary.")
-    print("2 - Binary to IP.")
+    print("1 - Binary to IP and Mask.")
+    print("2 - IP to binary.")
+    print("3 - Binary to IP.")
     print("")
-    print("3 - Decimal to binary conversion.")
-    print("4 - Binary to decimal conversion.")
+    print("4 - IP and Mask to binary.")
     print("")
-    print("5 - Decimal to hexa conversion.")
-    print("6 - Hexa to decimal conversion.")
+    print("5 - Decimal to binary conversion.")
+    print("6 - Binary to decimal conversion.")
     print("")
-    print("9 - Quit the program.")
+    print("7 - Decimal to hexa conversion.")
+    print("8 - Hexa to decimal conversion.")
+    print("")
+    print("0 - Quit the program.")
     print("")
     userChoice=input("Your choice: ")
 
@@ -474,7 +554,7 @@ def main():
         print("")
         hextodec()
 
-    elif userChoice=="9":
+    elif userChoice=="0 ":
         exit(0)
     
     else:
