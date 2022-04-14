@@ -5,8 +5,10 @@ import os
 from os import system
 import ctypes
 from ast import If
+from ipaddress import IPv4Address
 
-def run():
+def Check_UserInput():
+
     if len(sys.argv)==1:
         usage()
     elif str(sys.argv[1])=="--help":
@@ -49,23 +51,23 @@ def run():
         usage()
 
     elif str(sys.argv[1])=="--ipmasktobin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="--ipmask2bin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="--ipm2b":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="-ipmasktobin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="-ipmask2bin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="-ipm2b":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="/ipmasktobin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="/ipmask2bin":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
     elif str(sys.argv[1])=="/ipm2b":
-        ipandmasktobin()
+        ipAddrAndMasktobin()
 
     elif str(sys.argv[1])=="--iptobin":
         iptobin()
@@ -213,6 +215,7 @@ def clear():
     os.system("cls" if os.name=="nt" else "clear")
 
 def dectobin():
+
     if len(sys.argv)==2:
         dec_value=input("Enter a decimal number: ")
         dec_value=int(dec_value)
@@ -223,6 +226,7 @@ def dectobin():
         print("Initial value (decimal):",dec_value)
         print("Binary value:",bin_value)
         print("Signed binary number value:",bin_complement_value)
+        exit(0)
     
     elif len(sys.argv)==3:
         dec_value=int(sys.argv[2])
@@ -233,6 +237,7 @@ def dectobin():
         print("Initial value (decimal):",dec_value)
         print("Binary value:",bin_value)
         print("Signed binary number value:",bin_complement_value)
+        exit(0)
 
     elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
@@ -242,7 +247,8 @@ def dectobin():
         print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
 
-def bintodec(): 
+def bintodec():
+
     if len(sys.argv)==2:
         bin_value=input("Enter a binary number: ")
         new_bin_value="0b"+bin_value
@@ -251,6 +257,7 @@ def bintodec():
         print("")
         print("Initial value (binary):",bin_value)
         print("Decimal value:",dec_value)
+        exit(0)
     
     elif len(sys.argv)==3:
         bin_value=(sys.argv[2])
@@ -259,6 +266,7 @@ def bintodec():
 
         print("Initial value (binary):",bin_value)
         print("Decimal value:",dec_value)
+        exit(0)
 
     elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
@@ -269,6 +277,7 @@ def bintodec():
         exit(1)
 
 def dectohex():
+
     if len(sys.argv)==2:
         dec_value=input("Enter a decimal number: ")
         dec_value=int(dec_value)
@@ -277,6 +286,7 @@ def dectohex():
         print("")
         print("Initial value (decimal):",dec_value)
         print("Hexadecimal value:",hex_value)
+        exit(0)
     
     elif len(sys.argv)==3:
         dec_value=int(sys.argv[2])
@@ -285,6 +295,7 @@ def dectohex():
 
         print("Initial value (decimal):",dec_value)
         print("Hexadecimal value:",hex_value)
+        exit(0)
 
     elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
@@ -295,6 +306,7 @@ def dectohex():
         exit(1)
 
 def hextodec():
+
     if len(sys.argv)==2:
         hex_value=input("Enter a hexadecimal number: ")
         new_hex_value="0x"+hex_value
@@ -303,6 +315,7 @@ def hextodec():
         print("")
         print("Initial value (hexadecimal):",hex_value)
         print("Decimal value:",dec_value)
+        exit(0)
     
     elif len(sys.argv)==3:
         hex_value=(sys.argv[2])
@@ -311,6 +324,7 @@ def hextodec():
 
         print("Initial value (hexa):",hex_value)
         print("Decimal value:",dec_value)
+        exit(0)
 
     elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
@@ -321,50 +335,15 @@ def hextodec():
         exit(1)
 
 def iptobin():
+
     if len(sys.argv)==2:
-        ip=input("Input a IP address: ")
+        ip=input("Enter an IP address: ")
         addr=[0,0,0,0]
         addr=ip
         addr=[int(x) for x in addr.split(".")]
 
-    if len(addr)<4:
-        print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-        exit(1)
-    
-        First_Byte_dec=addr[0]
-        Second_Byte_dec=addr[1]
-        Third_Octet_dec=addr[2]
-        Fourth_Octet_dec=addr[3]
-    
-        First_Byte_bin=bin(First_Byte_dec)[2:]
-        Second_Byte_bin=bin(Second_Byte_dec)[2:]
-        Third_Octet_bin=bin(Third_Octet_dec)[2:]
-        Fourth_Octet_bin=bin(Fourth_Octet_dec)[2:]
-    
-        final_bin_value=First_Byte_bin+"."+Second_Byte_bin+"."+Third_Octet_bin+"."+Fourth_Octet_bin
-    
-        First_Byte_bin_complement=format(First_Byte_dec, '#010b')[2:]
-        Second_Byte_bin_complement=format(Second_Byte_dec, '#010b')[2:]
-        Third_Octet_bin_complement=format(Third_Octet_dec, '#010b')[2:]
-        Fourth_Octet_bin_complement=format(Fourth_Octet_dec, '#010b')[2:]
-    
-        final_bin_complement_value=First_Byte_bin_complement+"."+Second_Byte_bin_complement+"."+Third_Octet_bin_complement+"."+Fourth_Octet_bin_complement
-
-        print("Initial value (IP in decimal):",ip)
-        print("")
-        print("Binary value:",final_bin_value)
-        print("Signed binary number value:",final_bin_complement_value)
-
-    elif len(sys.argv)==3:
-        ip=(sys.argv[2])
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)<4:
-            print("\033[0;31mAn IP address must be coded on 4 bytes.\033[00m")
-            print("")
-            input("Please press the Enter key to proceed.")
+        if len(addr)>4 or len(addr)<4:
+            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
             exit(1)
     
         First_Byte_dec=addr[0]
@@ -379,53 +358,18 @@ def iptobin():
     
         final_bin_value=First_Byte_bin+"."+Second_Byte_bin+"."+Third_Octet_bin+"."+Fourth_Octet_bin
     
-        First_Byte_bin_complement=format(First_Byte_dec, '#010b')[2:]
-        Second_Byte_bin_complement=format(Second_Byte_dec, '#010b')[2:]
-        Third_Octet_bin_complement=format(Third_Octet_dec, '#010b')[2:]
-        Fourth_Octet_bin_complement=format(Fourth_Octet_dec, '#010b')[2:]
+        First_Byte_bin_complement=format(First_Byte_dec,'#010b')[2:]
+        Second_Byte_bin_complement=format(Second_Byte_dec,'#010b')[2:]
+        Third_Octet_bin_complement=format(Third_Octet_dec,'#010b')[2:]
+        Fourth_Octet_bin_complement=format(Fourth_Octet_dec,'#010b')[2:]
     
         final_bin_complement_value=First_Byte_bin_complement+"."+Second_Byte_bin_complement+"."+Third_Octet_bin_complement+"."+Fourth_Octet_bin_complement
 
-        print("Initial value (IP in decimal):",ip)
         print("")
-        print("Binary value:",final_bin_value)
+        print("Initial value (IP address in decimal):",ip)
+        print("IP address in binary format:",final_bin_value)
         print("Signed binary number value:",final_bin_complement_value)
-
-def bintoip():
-    if len(sys.argv)<3:
-        ip=input("Enter an IP address in binary format: ")
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)<4:
-            print("\033[0;31mAn IP address must be coded on 4 bytes.\033[00m")
-            print("")
-            input("Please press the Enter key to proceed.")
-            print("")
-            iptobin()
-    
-        First_Byte_bin=addr[0]
-        New_First_Byte_bin="0b"+str(First_Byte_bin)
-        First_Byte_dec=int(New_First_Byte_bin, 2)
-
-        Second_Byte_bin=addr[1]
-        New_Second_Byte_bin="0b"+str(Second_Byte_bin)
-        Second_Byte_dec=int(New_Second_Byte_bin, 2)
-
-        Third_Octet_bin=addr[2]
-        New_Third_Octet_bin="0b"+str(Third_Octet_bin)
-        Third_Octet_dec=int(New_Third_Octet_bin, 2)
-
-        Fourth_Octet_bin=addr[3]
-        New_Fourth_Octet_bin="0b"+str(Fourth_Octet_bin)
-        Fourth_Octet_dec=int(New_Fourth_Octet_bin, 2)
-    
-        final_dec_value=str(First_Byte_dec)+"."+str(Second_Byte_dec)+"."+str(Third_Octet_dec)+"."+str(Fourth_Octet_dec)
-
-        print("Initial value (IP in decimal):",ip)
-        print("")
-        print("Decimal value:",final_dec_value)
+        exit(0)
 
     elif len(sys.argv)==3:
         ip=(sys.argv[2])
@@ -433,12 +377,60 @@ def bintoip():
         addr=ip
         addr=[int(x) for x in addr.split(".")]
 
-        if len(addr)<4:
-            print("\033[0;31mAn IP address must be coded on 4 bytes.\033[00m")
-            print("")
-            input("Please press the Enter key to proceed.")
-            print("")
-            iptobin()
+        if len(addr)>4 or len(addr)<4:
+            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+            exit(1)
+    
+        First_Byte_dec=addr[0]
+        Second_Byte_dec=addr[1]
+        Third_Octet_dec=addr[2]
+        Fourth_Octet_dec=addr[3]
+    
+        First_Byte_bin=bin(First_Byte_dec)[2:]
+        Second_Byte_bin=bin(Second_Byte_dec)[2:]
+        Third_Octet_bin=bin(Third_Octet_dec)[2:]
+        Fourth_Octet_bin=bin(Fourth_Octet_dec)[2:]
+    
+        final_bin_value=First_Byte_bin+"."+Second_Byte_bin+"."+Third_Octet_bin+"."+Fourth_Octet_bin
+    
+        First_Byte_bin_complement=format(First_Byte_dec,'#010b')[2:]
+        Second_Byte_bin_complement=format(Second_Byte_dec,'#010b')[2:]
+        Third_Octet_bin_complement=format(Third_Octet_dec,'#010b')[2:]
+        Fourth_Octet_bin_complement=format(Fourth_Octet_dec,'#010b')[2:]
+    
+        final_bin_complement_value=First_Byte_bin_complement+"."+Second_Byte_bin_complement+"."+Third_Octet_bin_complement+"."+Fourth_Octet_bin_complement
+
+        print("Initial value (IP address in decimal):",ip)
+        print("IP address in binary format:",final_bin_value)
+        print("Signed binary number value:",final_bin_complement_value)
+        exit(0)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def bintoip():
+
+    if len(sys.argv)==2:
+        ip=input("Enter an IP address in binary format: ")
+
+        Test_Value=ip
+        Test_Value=[str(x) for x in Test_Value.split(" ")]
+        if len(Test_Value)>=2:
+            print("\033[0;31mAn IP address, whether in binary or decimal, cannot contain spaces.\033[00m")
+            exit(1)
+
+        addr=[0,0,0,0]
+        addr=ip
+        addr=[int(x) for x in addr.split(".")]
+
+        if len(addr)>4 or len(addr)<4:
+            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+            exit(1)
     
         First_Byte_bin=addr[0]
         New_First_Byte_bin="0b"+str(First_Byte_bin)
@@ -458,38 +450,77 @@ def bintoip():
     
         final_dec_value=str(First_Byte_dec)+"."+str(Second_Byte_dec)+"."+str(Third_Octet_dec)+"."+str(Fourth_Octet_dec)
 
-        print("Initial value (IP in decimal):",ip)
         print("")
-        print("Decimal value:",final_dec_value)
+        print("Initial value (IP address in binary format):",ip)
+        print("IP address in decimal format:",final_dec_value)
 
-def ipandmasktobin():
-        print(len(sys.argv))
-        print(str(sys.argv))
+    elif len(sys.argv)==3:
+        ip=(sys.argv[2])
+        addr=[0,0,0,0]
+        addr=ip
+        addr=[int(x) for x in addr.split(".")]
+
+        if len(addr)>4 or len(addr)<4:
+            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+            exit(1)
+    
+        First_Byte_bin=addr[0]
+        New_First_Byte_bin="0b"+str(First_Byte_bin)
+        First_Byte_dec=int(New_First_Byte_bin, 2)
+
+        Second_Byte_bin=addr[1]
+        New_Second_Byte_bin="0b"+str(Second_Byte_bin)
+        Second_Byte_dec=int(New_Second_Byte_bin, 2)
+
+        Third_Octet_bin=addr[2]
+        New_Third_Octet_bin="0b"+str(Third_Octet_bin)
+        Third_Octet_dec=int(New_Third_Octet_bin, 2)
+
+        Fourth_Octet_bin=addr[3]
+        New_Fourth_Octet_bin="0b"+str(Fourth_Octet_bin)
+        Fourth_Octet_dec=int(New_Fourth_Octet_bin, 2)
+    
+        final_dec_value=str(First_Byte_dec)+"."+str(Second_Byte_dec)+"."+str(Third_Octet_dec)+"."+str(Fourth_Octet_dec)
+
+        print("Initial value (IP address in binary format):",ip)
+        print("IP address in decimal format:",final_dec_value)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def ipAddrAndMasktobin():
+
         if len(sys.argv)==2:
-            ipandmask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
+            ipAddrAndMask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
         
             addr=[0,0,0,0]
-            addr=ipandmask
+            addr=ipAddrAndMask
             cidr=0
 
-            if '/' in ipandmask:
-                (addr, cidr)=ipandmask.split('/')
+            if "/" in ipAddrAndMask:
+                (addr,cidr)=ipAddrAndMask.split('/')
 
                 addr=[int(x) for x in addr.split(".")]
                 cidr=int(cidr)
-                mask=[ (((1<<32)-1) << (32-cidr) >> i ) & 255 for i in reversed(range(0, 32, 8)) ]
-            elif not '/' in ipandmask:
-                (addr, mask)=ipandmask.split(' ')
+                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
+            
+            elif " " in ipAddrAndMask:
+                (addr, mask)=ipAddrAndMask.split(' ')
 
                 addr=[int(x) for x in addr.split(".")]
-                mask= [int(x) for x in mask.split(".")]
+                mask=[int(x) for x in mask.split(".")]
                 cidr=sum((bin(x).count('1') for x in mask))
    
             else:
-                print("\033[0;31mNo valid arguments were detected.\033[00m")
+                print("\033[0;31mInvalid arguments have been detected.\033[00m")
                 print("")
-                print("Example of a valid argument: <ip/cidr>")
-                print("Example of a valid argument: <ip> <mask>")
+                print("Example of a valid argument expected: <ip/cidr>")
+                print("Example of a valid argument expected: <ip> <mask>")
                 exit(1)
 
             First_Addr_Byte_dec=addr[0]
@@ -530,39 +561,38 @@ def ipandmasktobin():
             
             final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
         
-            print("Initial values (IP and mask in decimal):",ipandmask)
             print("")
-            print("Binary address value:",final_addr_bin_value)
-            print("Binary adress signed 2s complement:",final_addr_bin_complement_value)
+            print("Initial value (IP address and mask in decimal format):",ipAddrAndMask)
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
             print("")
-            print("Binary mask value:",final_mask_bin_value)
-            print("Binary mask signed 2s complement:",final_mask_bin_complement_value)
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            exit(0)
 
         elif len(sys.argv)==3:
-            ipandmask=(sys.argv[2])
+
+            ipAddrAndCIDR=(sys.argv[2])
         
             addr=[0,0,0,0]
-            addr=ipandmask
+            addr=ipAddrAndCIDR
             cidr=0
 
-            if '/' in ipandmask:
-                (addr, cidr)=ipandmask.split('/')
-
+            if "/" in addr:
+                (addr,cidr)=addr.split('/')
                 addr=[int(x) for x in addr.split(".")]
                 cidr=int(cidr)
-                mask=[ (((1<<32)-1) << (32-cidr) >> i ) & 255 for i in reversed(range(0, 32, 8)) ]
-            elif not '/' in ipandmask:
-                (addr, mask)=ipandmask.split(' ')
+                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
 
-                addr=[int(x) for x in addr.split(".")]
-                mask= [int(x) for x in mask.split(".")]
-                cidr=sum((bin(x).count('1') for x in mask))
-   
-            else:
-                print("\033[0;31mNo valid arguments were detected.\033[00m")
+            elif not "/" in addr:
+                print("\033[0;31mInvalid arguments have been detected.\033[00m")
                 print("")
-                print("Example of a valid argument: <ip/cidr>")
-                print("Example of a valid argument: <ip> <mask>")
+                print("Example of a valid argument expected: <ip/cidr>")
+                print("Example of a valid argument expected: <ip> <mask>")
+                exit(1)
+
+            else:
+                print("\033[0;31mAn unexpected error was caused.\033[00m")
                 exit(1)
 
             First_Addr_Byte_dec=addr[0]
@@ -603,71 +633,148 @@ def ipandmasktobin():
             
             final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
         
-            print("Initial values (IP and mask in decimal):",ipandmask)
             print("")
-            print("Binary address value:",final_addr_bin_value)
-            print("Binary adress signed 2s complement:",final_addr_bin_complement_value)
+            print("Initial value (IP address and mask in decimal format):",ipAddrAndCIDR)
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
             print("")
-            print("Binary mask value:",final_mask_bin_value)
-            print("Binary mask signed 2s complement:",final_mask_bin_complement_value)
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            exit(0)
 
         elif len(sys.argv)==4:
-            ip=(sys.argv[2])
+
+            addr=(sys.argv[2])
             mask=(sys.argv[3])
         
-            addr=[0,0,0,0]
-            addr=ip
+            IpAddr=[0,0,0,0]
+            IpAddr=addr
+
+            MaskAddr=[0,0,0,0]
+            MaskAddr=mask
+
             cidr=0
 
-            addr=[int(x) for x in addr.split(".")]
-            mask= [int(x) for x in mask.split(".")]
-            cidr=sum((bin(x).count('1') for x in mask))
+            IpAddr=[int(x) for x in IpAddr.split(".")]
+            MaskAddr= [int(x) for x in MaskAddr.split(".")]
+            cidr=sum((bin(x).count('1') for x in MaskAddr))
 
-        First_Addr_Byte_dec=addr[0]
-        Second_Addr_Byte_dec=addr[1]
-        Third_Addr_Byte_dec=addr[2]
-        Fourth_Addr_Byte_dec=addr[3]
+            if len(IpAddr)>4 or len(IpAddr)<4:
+                print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+                exit(1)
+
+            elif len(MaskAddr)>4 or len(MaskAddr)<4:
+                print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
+                exit(1)
+
+            First_Addr_Byte_dec=IpAddr[0]
+            Second_Addr_Byte_dec=IpAddr[1]
+            Third_Addr_Byte_dec=IpAddr[2]
+            Fourth_Addr_Byte_dec=IpAddr[3]
+            
+            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
+            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
+            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
+            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+            
+            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
+            
+            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
+            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
+            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
+            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
+            
+            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
         
-        First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-        Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-        Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-        Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+            First_Mask_Byte_dec=MaskAddr[0]
+            Second_Mask_Byte_dec=MaskAddr[1]
+            Third_Mask_Byte_dec=MaskAddr[2]
+            Fourth_Mask_Byte_dec=MaskAddr[3]
+            
+            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
+            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
+            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
+            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
+            
+            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
+            
+            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
+            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
+            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
+            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
+            
+            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
         
-        final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-        
-        First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-        Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-        Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-        Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-        
-        final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-    
-        First_Mask_Byte_dec=mask[0]
-        Second_Mask_Byte_dec=mask[1]
-        Third_Mask_Byte_dec=mask[2]
-        Fourth_Mask_Byte_dec=mask[3]
-        
-        First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-        Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-        Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-        Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-        
-        final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-        
-        First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-        Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-        Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-        Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-        
-        final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-    
-        print("Initial values (IP and mask in decimal):",ip,cidr)
+            print("Initial value (IP address in decimal format):",addr)
+            print("Initial value (Mask in decimal format):",mask)
+            SlideCidr="/"+str(cidr)
+            print("CIDR:",SlideCidr)
+            print("")
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
+            print("")
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            exit(0)
+
+        elif len(sys.argv)>=5:
+            print("\033[0;31mInvalid arguments have been detected.\033[00m")
+            print("")
+            print("Example of a valid argument expected: <ip/cidr>")
+            print("Example of a valid argument expected: <ip> <mask>")
+            exit(1)
+
+        else:
+            print("\033[0;31mAn unexpected error was caused.\033[00m")
+            exit(1)
+
+def masktocidr():
+
+    if len(sys.argv)==2:
+        mask=input("Enter a mask: ")
+        MaskAddr=[0,0,0,0]
+        MaskAddr=mask
+        cidr=0
+        MaskAddr= [int(x) for x in MaskAddr.split(".")]
+        cidr=sum((bin(x).count('1') for x in MaskAddr))
+
         print("")
-        print("Binary address value:",final_addr_bin_value)
-        print("Binary adress signed 2s complement:",final_addr_bin_complement_value)
-        print("")
-        print("Binary mask value:",final_mask_bin_value)
-        print("Binary mask signed 2s complement:",final_mask_bin_complement_value)
+        print("Initial value (Mask):",mask)
+        SlideCidr="/"+str(cidr)
+        print("CIDR:",SlideCidr)
+
+    elif len(sys.argv)>=3:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def cidrtomask():
+
+    if len(sys.argv)==2:
+        cidr=input("Enter a CIDR: ")
+        cidr=int(cidr)
+        mask = (0xffffffff >> (32 - cidr)) << (32 - cidr)
+        return (str( (0xff000000 & mask) >> 24)   + '.' +
+          str( (0x00ff0000 & mask) >> 16)   + '.' +
+          str( (0x0000ff00 & mask) >> 8)    + '.' +
+          str( (0x000000ff & mask)))
+
+    elif len(sys.argv)>=3:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def masktowildcard():
+    print("test")
+
+def wildcardtomask():
+    print("test")
 
 def main():
     clear()
@@ -730,4 +837,5 @@ def main():
         exit(1)
 
 if __name__ == "__main__":
-    run()
+#    Check_UserInput()
+    masktocidr()
