@@ -182,6 +182,44 @@ def Check_UserInput():
         hextodec()
     elif str(sys.argv[1])=="/h2d":
         hextodec()
+
+    elif str(sys.argv[1])=="--masktocidr":
+        masktocidr()
+    elif str(sys.argv[1])=="--mask2cidr":
+        masktocidr()
+    elif str(sys.argv[1])=="--m2c":
+        masktocidr()
+    elif str(sys.argv[1])=="-masktocidr":
+        masktocidr()
+    elif str(sys.argv[1])=="-mask2cidr":
+        masktocidr()
+    elif str(sys.argv[1])=="-m2c":
+        masktocidr()
+    elif str(sys.argv[1])=="/masktocidr":
+        masktocidr()
+    elif str(sys.argv[1])=="/mask2cidr":
+        masktocidr()
+    elif str(sys.argv[1])=="/m2c":
+        masktocidr()
+
+    elif str(sys.argv[1])=="--cidrtomask":
+        cidrtomask()
+    elif str(sys.argv[1])=="--cidr2mask":
+        cidrtomask()
+    elif str(sys.argv[1])=="--c2m":
+        cidrtomask()
+    elif str(sys.argv[1])=="-cidrtomask":
+        cidrtomask()
+    elif str(sys.argv[1])=="-cidr2mask":
+        cidrtomask()
+    elif str(sys.argv[1])=="-c2m":
+        cidrtomask()
+    elif str(sys.argv[1])=="/cidrtomask":
+        cidrtomask()
+    elif str(sys.argv[1])=="/cidr2mask":
+        cidrtomask()
+    elif str(sys.argv[1])=="/c2m":
+        cidrtomask()
     
     else:
         print("\033[0;31mAn unexpected error was caused.\033[00m")
@@ -205,6 +243,9 @@ def usage():
     print("")
     print("     --dectohex decimal-number: convert a decimal number into a hexadecimal number.")
     print("     --hextodec hexa_number: convert a hexadecimal number into a decimal number.")
+    print("")
+    print("     --masktocidr mask: calculate the CIDR of a mask.")
+    print("     --cidrtomask cidr: calculate the mask from a CIDR.")
     print("")
     print("EXAMPLES:")
     print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
@@ -732,18 +773,40 @@ def masktocidr():
 
     if len(sys.argv)==2:
         mask=input("Enter a mask: ")
+
         MaskAddr=[0,0,0,0]
         MaskAddr=mask
         cidr=0
-        MaskAddr= [int(x) for x in MaskAddr.split(".")]
+        MaskAddr=[int(x) for x in MaskAddr.split(".")]
         cidr=sum((bin(x).count('1') for x in MaskAddr))
+
+        if len(MaskAddr)>4 or len(MaskAddr)<4:
+            print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
+            exit(1)
 
         print("")
         print("Initial value (Mask):",mask)
         SlideCidr="/"+str(cidr)
         print("CIDR:",SlideCidr)
 
-    elif len(sys.argv)>=3:
+    elif len(sys.argv)==3:
+        mask=sys.argv[2]
+
+        MaskAddr=[0,0,0,0]
+        MaskAddr=mask
+        cidr=0
+        MaskAddr=[int(x) for x in MaskAddr.split(".")]
+        cidr=sum((bin(x).count('1') for x in MaskAddr))
+
+        if len(MaskAddr)>4 or len(MaskAddr)<4:
+            print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
+            exit(1)
+
+        print("Initial value (Mask):",mask)
+        SlideCidr="/"+str(cidr)
+        print("CIDR:",SlideCidr)
+
+    elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
         exit(1)
 
@@ -756,13 +819,48 @@ def cidrtomask():
     if len(sys.argv)==2:
         cidr=input("Enter a CIDR: ")
         cidr=int(cidr)
-        mask = (0xffffffff >> (32 - cidr)) << (32 - cidr)
-        return (str( (0xff000000 & mask) >> 24)   + '.' +
-          str( (0x00ff0000 & mask) >> 16)   + '.' +
-          str( (0x0000ff00 & mask) >> 8)    + '.' +
-          str( (0x000000ff & mask)))
 
-    elif len(sys.argv)>=3:
+        mask=[]
+        dat=0
+        ii=[1]*cidr
+        for i in range(len(ii)):
+            math=i%8
+            if math==0:
+                if i>=8:
+                    mask.append(dat)
+                    dat = 0
+            dat+=pow(2,7-math)
+        mask.append(dat)
+        [mask.append(0) for i in range(4 - len(mask))]
+        final_Mask=".".join([str(i) for i in mask])
+
+        print("")
+        print("Initial value (CIDR):",cidr)
+        print("Mask:",final_Mask)
+
+    elif len(sys.argv)==3:
+        cidr=sys.argv[2]
+        cidr=int(cidr)
+
+        mask=[]
+        dat=0
+        ii=[1]*cidr
+        for i in range(len(ii)):
+            math=i%8
+            if math==0:
+                if i>=8:
+                    mask.append(dat)
+                    dat = 0
+            dat+=pow(2,7-math)
+        mask.append(dat)
+        [mask.append(0) for i in range(4 - len(mask))]
+        final_Mask=".".join([str(i) for i in mask])
+
+        print("")
+        print("Initial value (CIDR):",cidr)
+        print("Mask:",final_Mask)
+
+    elif len(sys.argv)>=4:
         print("\033[0;31mOnly one argument is expected.\033[00m")
         exit(1)
 
@@ -837,5 +935,4 @@ def main():
         exit(1)
 
 if __name__ == "__main__":
-#    Check_UserInput()
-    masktocidr()
+    Check_UserInput()
