@@ -220,6 +220,82 @@ def Check_UserInput():
         cidrtomask()
     elif str(sys.argv[1])=="/c2m":
         cidrtomask()
+
+    elif str(sys.argv[1])=="--masktowildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="--mask2wildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="--m2w":
+        masktowildcard()
+    elif str(sys.argv[1])=="-masktowildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="-mask2wildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="-m2w":
+        masktowildcard()
+    elif str(sys.argv[1])=="/masktowildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="/mask2wildcard":
+        masktowildcard()
+    elif str(sys.argv[1])=="/m2w":
+        masktowildcard()
+
+    elif str(sys.argv[1])=="--wildcardtomask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="--wildcard2mask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="--w2m":
+        wildcardtomask()
+    elif str(sys.argv[1])=="-wildcardtomask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="-wildcard2mask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="-w2m":
+        wildcardtomask()
+    elif str(sys.argv[1])=="/wildcardtomask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="/wildcard2mask":
+        wildcardtomask()
+    elif str(sys.argv[1])=="/w2m":
+        wildcardtomask()
+
+    elif str(sys.argv[1])=="--cidrtowildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="--cidr2wildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="--c2w":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="-cidrtowildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="-cidr2wildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="-c2w":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="/cidrtowildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="/cidr2wildcard":
+        cidrtowildcard()
+    elif str(sys.argv[1])=="/c2w":
+        cidrtowildcard()
+
+    elif str(sys.argv[1])=="--wildcardtocidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="--wildcard2cidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="--w2c":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="-wildcardtocidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="-wildcard2cidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="-w2c":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="/wildcardtocidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="/wildcard2cidr":
+        wildcardtocidr()
+    elif str(sys.argv[1])=="/w2c":
+        wildcardtocidr()
     
     else:
         print("\033[0;31mAn unexpected error was caused.\033[00m")
@@ -246,6 +322,12 @@ def usage():
     print("")
     print("     --masktocidr mask: calculate the CIDR of a mask.")
     print("     --cidrtomask cidr: calculate the mask from a CIDR.")
+    print("")
+    print("     --masktowildcard mask: convert a mask to wildcard mask.")
+    print("     --wildcardtomask wildcard_mask: convert a wildcard mask to a mask.")
+    print("")
+    print("     --cidrtowildcard mask: convert a mask to wildcard mask.")
+    print("     --wildcardtocidr wildcard_mask: convert a wildcard mask to a mask.")
     print("")
     print("EXAMPLES:")
     print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
@@ -869,10 +951,87 @@ def cidrtomask():
         exit(1)
 
 def masktowildcard():
-    print("test")
+
+    if len(sys.argv)==2:
+        mask=input("Enter a mask: ")
+
+        wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
+
+        print("")
+        print("Initial value (Mask):",mask)
+        print("Wildcard mask:",wildcardmask)
+
+    elif len(sys.argv)==3:
+        mask=sys.argv[2]
+
+        wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
+
+        print("Initial value (Mask):",mask)
+        print("Wildcard mask:",wildcardmask)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
 
 def wildcardtomask():
-    print("test")
+
+    if len(sys.argv)==2:
+        wildcard=input("Enter a wildcard mask: ")
+
+        mask=str(IPv4Address(int(IPv4Address(wildcard))^(2**32-1)))
+
+        print("")
+        print("Initial value (wildcard mask):",wildcard)
+        print("Mask:",mask)
+
+    elif len(sys.argv)==3:
+        wildcard=sys.argv[2]
+
+        mask=str(IPv4Address(int(IPv4Address(wildcard))^(2**32-1)))
+
+        print("Initial value (wildcard mask):",wildcard)
+        print("Mask:",mask)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def cidrtowildcard():
+
+    if len(sys.argv)==2:
+        cidr=input("Enter a CIDR: ")
+
+        wildcardmask=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
+
+        print("")
+        print("Initial value (CIDR):",cidr)
+        print("Wildcard mask:",wildcardmask)
+
+    elif len(sys.argv)==3:
+        cidr=sys.argv[2]
+
+        wildcardmask=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
+
+        print("Initial value (CIDR):",cidr)
+        print("Wildcard mask:",wildcardmask)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
+def wildcardtocidr():
 
 def main():
     clear()
