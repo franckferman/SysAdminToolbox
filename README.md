@@ -1,7 +1,4 @@
-# the_network_calculator_toolbox
-The Network Calculator Toolbox is a tool allowing the realization of numerous calculations dedicated essentially to the network administration.
-
-  <div id="top"></div>
+<div id="top"></div>
 
 [![Contributors][contributors-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/graphs/contributors)
 [![Forks][forks-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/network/members)
