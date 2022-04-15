@@ -69,8 +69,6 @@ The Network Calculator Toolbox is a tool allowing the realization of numerous ca
 
 <br />Here is an overview of the available features:
 
-<br />
-
 - Convert an IP address and its mask (or CIDR) into a binary number.
 
 - Convert an IP address (in decimal format) to a binary number.
