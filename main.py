@@ -1033,61 +1033,129 @@ def cidrtowildcard():
 
 def wildcardtocidr():
 
+    if len(sys.argv)==2:
+        wildcardmask=input("Enter a wildcard mask: ")
+
+        cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
+
+        print("")
+        print("Initial value (wildcard mask):",wildcardmask)
+        print("Wildcard mask:",cidr)
+
+    elif len(sys.argv)==3:
+        wildcardmask=sys.argv[2]
+
+        cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
+
+        print("Initial value (wildcard mask):",wildcardmask)
+        print("Wildcard mask:",cidr)
+
+    elif len(sys.argv)>=4:
+        print("\033[0;31mOnly one argument is expected.\033[00m")
+        exit(1)
+
+    else:
+        print("\033[0;31mAn unexpected error was caused.\033[00m")
+        exit(1)
+
 def main():
     clear()
     print("")
-    print("╔╦╗┬ ┬┌─┐  ╔╗╔┌─┐┌┬┐┬ ┬┌─┐┬─┐┬┌─  ")
-    print(" ║ ├─┤├┤   ║║║├┤  │ ││││ │├┬┘├┴┐  ")
-    print(" ╩ ┴ ┴└─┘  ╝╚╝└─┘ ┴ └┴┘└─┘┴└─┴ ┴  ")
-    print("╔═╗┌─┐┬  ┌─┐┬ ┬┬  ┌─┐┌┬┐┌─┐┬─┐    ")
-    print("║  ├─┤│  │  │ ││  ├─┤ │ │ │├┬┘    ")
-    print("╚═╝┴ ┴┴─┘└─┘└─┘┴─┘┴ ┴ ┴ └─┘┴└─    ")
-    print("    ╔╦╗┌─┐┌─┐┬  ┌┐ ┌─┐─┐ ┬        ")
-    print("     ║ │ ││ ││  ├┴┐│ │┌┴┬┘        ")
-    print("     ╩ └─┘└─┘┴─┘└─┘└─┘┴ └─        ")
+    print("                      ╔╦╗┬ ┬┌─┐  ╔╗╔┌─┐┌┬┐┬ ┬┌─┐┬─┐┬┌─  ")
+    print("                       ║ ├─┤├┤   ║║║├┤  │ ││││ │├┬┘├┴┐  ")
+    print("                       ╩ ┴ ┴└─┘  ╝╚╝└─┘ ┴ └┴┘└─┘┴└─┴ ┴  ")
+    print("                      ╔═╗┌─┐┬  ┌─┐┬ ┬┬  ┌─┐┌┬┐┌─┐┬─┐    ")
+    print("                      ║  ├─┤│  │  │ ││  ├─┤ │ │ │├┬┘    ")
+    print("                      ╚═╝┴ ┴┴─┘└─┘└─┘┴─┘┴ ┴ ┴ └─┘┴└─    ")
+    print("                          ╔╦╗┌─┐┌─┐┬  ┌┐ ┌─┐─┐ ┬        ")
+    print("                           ║ │ ││ ││  ├┴┐│ │┌┴┬┘        ")
+    print("                           ╩ └─┘└─┘┴─┘└─┘└─┘┴ └─        ")
     print("")
-    print("1 - Binary to IP and Mask.")
-    print("2 - IP to binary.")
-    print("3 - Binary to IP.")
+    print("1 - IP & MASK TO BINARY: Convert an IP address and its mask (or CIDR) into a binary number.")
     print("")
-    print("4 - IP and Mask to binary.")
+    print("2 - IP TO BINARY: Convert an IP address (in decimal format) to a binary number.")
+    print("3 - BINARY TO IP: Convert an IP address (in binary number) to a decimal format.")
     print("")
-    print("5 - Decimal to binary conversion.")
-    print("6 - Binary to decimal conversion.")
+    print("4 - DECIMAL TO BINARY: Convert a decimal number into a binary number.")
+    print("5 - BINARY TO DECIMAL: Convert a binary number into a decimal number.")
     print("")
-    print("7 - Decimal to hexa conversion.")
-    print("8 - Hexa to decimal conversion.")
+    print("6 - DECIMAL TO HEXADECIMAL: Convert a decimal number into a hexadecimal number.")
+    print("7 - HEXADECIMAL TO DECIMAL: Convert a hexadecimal number into a decimal number")
+    print("")
+    print("8 - CIDR Calculator (FROM MASK, TO CIDR): Calculate the CIDR of a mask")
+    print("9 - Convert a CIDR (FROM CIDR, TO MASK): Calculate the mask from a CIDR.")
+    print("")
+    print("10 - MASK TO WILDCARD MASK CALCULATOR: Convert a mask to wildcard mask.")
+    print("11 - WILDCARD MASK TO MASK CALCULATOR: Convert a wildcard mask to a mask.")
+    print("")
+    print("12 - CIDR TO WILDCARD MASK: CONVERT A CIDR TO WILDCARD MASK.")
+    print("13 - WILDCARD TO MASK: Convert a wildcard mask to a mask")
     print("")
     print("0 - Quit the program.")
     print("")
-    userChoice=input("Your choice: ")
+    strUserChoice=input("Your choice: ")
+    userChoice=int(strUserChoice)
 
-    if userChoice=="1":
+    if userChoice==1:
+        print("")
+        ipAddrAndMasktobin()
+
+    elif userChoice==2:
         print("")
         iptobin()
 
-    elif userChoice=="2":
+    elif userChoice==3:
         print("")
         bintoip()
 
-    elif userChoice=="3":
+    elif userChoice==4:
         print("")
         dectobin()
 
-    elif userChoice=="4":
+    elif userChoice==5:
         print("")
         bintodec()
 
-    elif userChoice=="5":
+    elif userChoice==6:
         print("")
         dectohex()
 
-    elif userChoice=="6":
+    elif userChoice==7:
         print("")
         hextodec()
 
-    elif userChoice=="0 ":
+    elif userChoice==8:
+        print("")
+        masktocidr()
+
+    elif userChoice==9:
+        print("")
+        cidrtomask()
+
+    elif userChoice==10:
+        print("")
+        masktowildcard()
+
+    elif userChoice==11:
+        print("")
+        wildcardtomask()
+
+    elif userChoice==12:
+        print("")
+        cidrtowildcard()
+
+    elif userChoice==13:
+        print("")
+        wildcardtocidr()
+
+    elif userChoice==0:
+        print("")
+        print("Exit of the program in progress.")
         exit(0)
+
+    elif userChoice>13 or userChoice<0:
+        print("\033[0;31mYour answer is not a valid choice.\033[00m")
+        exit(1)
     
     else:
         print("\033[0;31mAn unexpected error was caused.\033[00m")
