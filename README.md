@@ -15,7 +15,7 @@
 <h3 align="center">The Network Calculator Toolbox</h3>
 
   <p align="center">
-    The Network Calculator Toolbox is a tool allowing the realization of numerous calculations dedicated essentially to the network administration.
+    The Network Calculator Toolbox is a Python3 tool allowing the realization of numerous calculations dedicated essentially to the network administration.
     <br />
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/README.md"><strong>Explore the full documentation »</strong></a>
     <br />
