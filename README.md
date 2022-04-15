@@ -9,7 +9,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
-    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/img/logo.png" alt="Logo" width="80" height="80">
+    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/img/logo.png" alt="Logo" width="120" height="120">
   </a>
 
 <h3 align="center">The Network Calculator Toolbox</h3>
