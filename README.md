@@ -55,7 +55,7 @@
 
 [![asciicast](https://asciinema.org/a/89042M80fkodhk45SasDXn0Qu.svg)](https://asciinema.org/a/89042M80fkodhk45SasDXn0Qu)
 
-The goal of this project is not to reinvent the wheel. But to my knowledge, no similar tool of this type as complete existed on Github before this one.
+The goal of this project is not to reinvent the wheel. But to my knowledge, no similar tool of this type as complete in Python existed on Github before this one.
 
 Of course, individually, on the whole, these projects all exist, but I haven't found a simple and quick tool to use to perform classic tasks that a network administrator for example would have to perform.
 
