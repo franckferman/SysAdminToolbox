@@ -7,6 +7,8 @@ import ctypes
 from ast import If
 from ipaddress import IPv4Address
 
+# List of arguments.
+
 def Check_UserInput():
 
     if len(sys.argv)==1:
@@ -296,6 +298,25 @@ def Check_UserInput():
         wildcardtocidr()
     elif str(sys.argv[1])=="/w2c":
         wildcardtocidr()
+
+    elif str(sys.argv[1])=="--subnetcalc":
+        subnet_calculator()
+    elif str(sys.argv[1])=="--subnet":
+        subnet_calculator()
+    elif str(sys.argv[1])=="--sc":
+        subnet_calculator()
+    elif str(sys.argv[1])=="-subnetcalc":
+        subnet_calculator()
+    elif str(sys.argv[1])=="-subnet":
+        subnet_calculator()
+    elif str(sys.argv[1])=="-sc":
+        subnet_calculator()
+    elif str(sys.argv[1])=="/subnetcalc":
+        subnet_calculator()
+    elif str(sys.argv[1])=="/subnet":
+        subnet_calculator()
+    elif str(sys.argv[1])=="/sc":
+        subnet_calculator()
     
     else:
         print("\033[0;31mAn unexpected error was caused.\033[00m")
@@ -329,6 +350,7 @@ def usage():
     print("     --cidrtowildcard mask: convert a mask to wildcard mask.")
     print("     --wildcardtocidr wildcard_mask: convert a wildcard mask to a mask.")
     print("")
+    print("     --subnetcalc IP/CIDR: network calculator from an IP/CIDR or IP MASK model.")
     print("EXAMPLES:")
     print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
     print("     python3 ./main.py --dectobin 42")
@@ -1057,6 +1079,282 @@ def wildcardtocidr():
     else:
         print("\033[0;31mAn unexpected error was caused.\033[00m")
         exit(1)
+
+def subnet_calculator():
+
+        if len(sys.argv)==2:
+            ipAddrAndMask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
+        
+            addr=[0,0,0,0]
+            addr=ipAddrAndMask
+            cidr=0
+
+            if "/" in ipAddrAndMask:
+                (addr,cidr)=ipAddrAndMask.split('/')
+
+                addr=[int(x) for x in addr.split(".")]
+                cidr=int(cidr)
+                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
+            
+            elif " " in ipAddrAndMask:
+                (addr, mask)=ipAddrAndMask.split(' ')
+
+                addr=[int(x) for x in addr.split(".")]
+                mask=[int(x) for x in mask.split(".")]
+                cidr=sum((bin(x).count('1') for x in mask))
+   
+            else:
+                print("\033[0;31mInvalid arguments have been detected.\033[00m")
+                print("")
+                print("Example of a valid argument expected: <ip/cidr>")
+                print("Example of a valid argument expected: <ip> <mask>")
+                exit(1)
+
+            First_Addr_Byte_dec=addr[0]
+            Second_Addr_Byte_dec=addr[1]
+            Third_Addr_Byte_dec=addr[2]
+            Fourth_Addr_Byte_dec=addr[3]
+            
+            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
+            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
+            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
+            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+            
+            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
+            
+            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
+            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
+            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
+            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
+            
+            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
+        
+            First_Mask_Byte_dec=mask[0]
+            Second_Mask_Byte_dec=mask[1]
+            Third_Mask_Byte_dec=mask[2]
+            Fourth_Mask_Byte_dec=mask[3]
+            
+            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
+            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
+            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
+            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
+            
+            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
+            
+            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
+            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
+            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
+            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
+            
+            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
+
+            # Calculation of the network address.
+
+            First_NetwAddr=First_Mask_Byte_bin_complement and First_Addr_Byte_bin_complement
+            Second_NetwAddr=Second_Mask_Byte_bin_complement and Second_Addr_Byte_bin_complement
+            Third_NetwAddr=Third_Mask_Byte_bin_complement and Third_Addr_Byte_bin_complement
+            Fourth_NetwAddr=Fourth_Mask_Byte_bin_complement and Fourth_Addr_Byte_bin_complement
+
+            final_NetwAddr=First_NetwAddr+"."+Second_NetwAddr+"."+Third_NetwAddr+"."+Fourth_NetwAddr
+
+            New_First_NetwAddr="0b"+First_Addr_Byte_bin_complement
+            Decimal_New_First_NetwAddr=int(New_First_NetwAddr, 2)
+            New_Second_NetwAddr="0b"+Second_Addr_Byte_bin_complement
+            Decimal_New_Second_NetwAddr=int(New_Second_NetwAddr, 2)
+            New_Third_NetwAddr="0b"+Third_Addr_Byte_bin_complement
+            Decimal_New_Third_NetwAddr=int(New_Third_NetwAddr, 2)
+            New_Fourth_NetwAddr="0b"+Fourth_Addr_Byte_bin_complement
+            Decimal_New_Fourth_NetwAddr=int(New_Fourth_NetwAddr, 2)
+
+            strDecimal_New_First_NetwAddr=str(Decimal_New_First_NetwAddr)
+            strDecimal_New_Second_NetwAddr=str(Decimal_New_Second_NetwAddr)
+            strDecimal_New_Third_NetwAddr=str(Decimal_New_Third_NetwAddr)
+            strDecimal_New_Fourth_NetwAddr=str(Decimal_New_Fourth_NetwAddr)
+
+            Decimal_New_final_NetwAddr=strDecimal_New_First_NetwAddr+"."+strDecimal_New_Second_NetwAddr+"."+strDecimal_New_Third_NetwAddr+"."+strDecimal_New_Fourth_NetwAddr
+
+            # Calculation of the broadcast address.
+
+            CalcTmp=First_Mask_Byte_bin_complement+Second_Mask_Byte_bin_complement+Third_Mask_Byte_bin_complement+Fourth_Mask_Byte_bin_complement
+            
+            intCalcTmpNumberOf0=int(CalcTmp.count('0'))
+
+            HostsNumber=2**intCalcTmpNumberOf0-2
+            brAddr=HostsNumber+1
+        
+            print("")
+            print("Initial value (IP address and mask in decimal format):",ipAddrAndMask)
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
+            print("")
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            print("")
+            print("Network address (decimal):",Decimal_New_final_NetwAddr)
+            print("Network address (binary):",final_NetwAddr)
+            print("Broadcast address:",brAddr)
+            print("")
+            print("Hosts number:",HostsNumber)
+
+            exit(0)
+
+        elif len(sys.argv)==3:
+
+            ipAddrAndCIDR=(sys.argv[2])
+        
+            addr=[0,0,0,0]
+            addr=ipAddrAndCIDR
+            cidr=0
+
+            if "/" in addr:
+                (addr,cidr)=addr.split('/')
+                addr=[int(x) for x in addr.split(".")]
+                cidr=int(cidr)
+                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
+
+            elif not "/" in addr:
+                print("\033[0;31mInvalid arguments have been detected.\033[00m")
+                print("")
+                print("Example of a valid argument expected: <ip/cidr>")
+                print("Example of a valid argument expected: <ip> <mask>")
+                exit(1)
+
+            else:
+                print("\033[0;31mAn unexpected error was caused.\033[00m")
+                exit(1)
+
+            First_Addr_Byte_dec=addr[0]
+            Second_Addr_Byte_dec=addr[1]
+            Third_Addr_Byte_dec=addr[2]
+            Fourth_Addr_Byte_dec=addr[3]
+            
+            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
+            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
+            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
+            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+            
+            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
+            
+            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
+            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
+            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
+            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
+            
+            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
+        
+            First_Mask_Byte_dec=mask[0]
+            Second_Mask_Byte_dec=mask[1]
+            Third_Mask_Byte_dec=mask[2]
+            Fourth_Mask_Byte_dec=mask[3]
+            
+            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
+            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
+            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
+            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
+            
+            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
+            
+            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
+            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
+            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
+            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
+            
+            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
+        
+            print("")
+            print("Initial value (IP address and mask in decimal format):",ipAddrAndCIDR)
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
+            print("")
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            exit(0)
+
+        elif len(sys.argv)==4:
+
+            addr=(sys.argv[2])
+            mask=(sys.argv[3])
+        
+            IpAddr=[0,0,0,0]
+            IpAddr=addr
+
+            MaskAddr=[0,0,0,0]
+            MaskAddr=mask
+
+            cidr=0
+
+            IpAddr=[int(x) for x in IpAddr.split(".")]
+            MaskAddr= [int(x) for x in MaskAddr.split(".")]
+            cidr=sum((bin(x).count('1') for x in MaskAddr))
+
+            if len(IpAddr)>4 or len(IpAddr)<4:
+                print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
+                exit(1)
+
+            elif len(MaskAddr)>4 or len(MaskAddr)<4:
+                print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
+                exit(1)
+
+            First_Addr_Byte_dec=IpAddr[0]
+            Second_Addr_Byte_dec=IpAddr[1]
+            Third_Addr_Byte_dec=IpAddr[2]
+            Fourth_Addr_Byte_dec=IpAddr[3]
+            
+            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
+            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
+            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
+            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
+            
+            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
+            
+            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
+            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
+            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
+            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
+            
+            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
+        
+            First_Mask_Byte_dec=MaskAddr[0]
+            Second_Mask_Byte_dec=MaskAddr[1]
+            Third_Mask_Byte_dec=MaskAddr[2]
+            Fourth_Mask_Byte_dec=MaskAddr[3]
+            
+            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
+            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
+            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
+            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
+            
+            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
+            
+            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
+            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
+            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
+            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
+            
+            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
+        
+            print("Initial value (IP address in decimal format):",addr)
+            print("Initial value (Mask in decimal format):",mask)
+            SlideCidr="/"+str(cidr)
+            print("CIDR:",SlideCidr)
+            print("")
+            print("IP address in binary format:",final_addr_bin_value)
+            print("Mask in binary format:",final_mask_bin_value)
+            print("")
+            print("Signed binary IP address number value:",final_addr_bin_complement_value)
+            print("Signed binary mask number value:",final_mask_bin_complement_value)
+            exit(0)
+
+        elif len(sys.argv)>=5:
+            print("\033[0;31mInvalid arguments have been detected.\033[00m")
+            print("")
+            print("Example of a valid argument expected: <ip/cidr>")
+            print("Example of a valid argument expected: <ip> <mask>")
+            exit(1)
+
+        else:
+            print("\033[0;31mAn unexpected error was caused.\033[00m")
+            exit(1)
 
 def main():
     clear()
