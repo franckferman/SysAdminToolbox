@@ -7,6 +7,7 @@
 [![Stargazers][stars-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/stargazers)
 [![Issues][issues-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/issues)
 [![MIT License][license-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/LICENSE)
+[![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/fferman42)
 
 </div>
 
