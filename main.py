@@ -1,1463 +1,754 @@
 import sys
-from sys import exit
 from sys import argv
 import os
 from os import system
-import ctypes
-from ast import If
+import ipaddress
 from ipaddress import IPv4Address
-
-# List of arguments.
+from ipaddress import IPv4Network
 
 def Check_UserInput():
 
-    if len(sys.argv)==1:
-        usage()
-    elif str(sys.argv[1])=="--help":
-        usage()
-    elif str(sys.argv[1])=="-help":
-        usage()
-    elif str(sys.argv[1])=="--h":
-        usage()
-    elif str(sys.argv[1])=="-h":
-        usage()
-    elif str(sys.argv[1])=="/help":
-        usage()
-    elif str(sys.argv[1])=="/h":
-        usage()
+	WordListUsage=["--help","-help","--h","-h","/help","/h","--usage","-usage","--u","-u","/usage","/u"]
+	WordListInteractive=["--interactive","-interactive","--i","-i","/interactive","/i"]
+	WordListDecToBin=["--dectobin","--dec2bin","--d2b","-dectobin","-dec2bin","-d2b","/dectobin","/dec2bin","/d2b"]
+	WordListBinToDec=["--bintodec","--bin2dec","--b2d","-bintodec","-bin2dec","-b2d","/bintodec","/bin2dec","/b2d"]
+	WordListDecToHex=["--dectohex","--dec2hex","--d2h","-dectohex","-dec2hex","-d2h","/dectohex","/dec2hex","/d2h"]
+	WordListHexToDec=["--hextodec","--hex2dec","--h2d","-hextodec","-hex2dec","-h2d","/hextodec","/hex2dec","/h2d"]
+	WordListIPToBin=["--iptobin","--ip2bin","--i2b","-iptobin","-ip2bin","-i2b","/iptobin","/ip2bin","/i2b"]
+	WordListBinToIP=["--bintoip","--bin2ip","--b2i","-bintoip","-bin2ip","-b2i","/bintoip","/bin2ip","/b2i"]
+	WordListMaskToBin=["--masktobin","--mask2bin","--m2b","-masktobin","-mask2bin","-m2b","/masktobin","/mask2bin","/m2b"]
+	WordListBinToMask=["--bintomask","--bin2mask","--b2m","-bintomask","-bin2mask","-b2m","/bintomask","/bin2mask","/b2m"]
+	WordListMaskToCIDR=["--masktocidr","--mask2cidr","--m2c","-masktocidr","-mask2cidr","-m2c","/masktocidr","/mask2cidr","/m2c"]
+	WordListCIDRToMask=["--cidrtomask","--cidr2mask","--c2m","-cidrtomask","-cidr2mask","-c2m","/cidrtomask","/cidr2mask","/c2m"]
+	WordListMaskToWildcard=["--masktowildcard","--mask2wildcard","--m2w","-masktowildcard","-mask2wildcard","-m2w","/masktowildcard","/mask2wildcard","/m2w"]
+	WordListWildcardToMask=["--wildcardtomask","--wildcard2mask","--w2m","-wildcardtomask","-wildcard2mask","-w2m","/wildcardtomask","/wildcard2mask","/w2m"]
+	WordListCIDRToWildcard=["--cidrtowildcard","--cidr2wildcard","--c2w","-cidrtowildcard","-cidr2wildcard","-c2w","/cidrtowildcard","/cidr2wildcard","/c2w"]
+	WordListWildcardToCIDR=["--wildcardtocidr","--wildcard2cidr","--w2c","-wildcardtocidr","-wildcard2cidr","-w2c","/wildcardtocidr","/wildcard2cidr","/w2c"]
+	WordListAddrToBin=["--addrtobin","--addr2bin","--a2b","-addrtobin","-addr2bin","-a2b","/addrtobin","/addr2bin","/a2b"]
+	WordListBinToAddr=["--bintoaddr","--bin2addr","--b2a","-bintoaddr","-bin2addr","-b2a","/bintoaddr","/bin2addr","/b2a"]
+	WordListSubnetCalc=["--subnetcalc","--subnet","--sc","-subnetcalc","-subnet","-sc","/subnetcalc","/subnet","/sc"]
 
-    elif str(sys.argv[1])=="--usage":
-        usage()
-    elif str(sys.argv[1])=="-usage":
-        usage()
-    elif str(sys.argv[1])=="--u":
-        usage()
-    elif str(sys.argv[1])=="-u":
-        usage()
-    elif str(sys.argv[1])=="/usage":
-        usage()
-    elif str(sys.argv[1])=="/u":
-        usage()
+	if len(sys.argv)==1:
+		usage()
 
-    elif str(sys.argv[1])=="--interactive":
-        main()
-    elif str(sys.argv[1])=="-interactive":
-        main()
-    elif str(sys.argv[1])=="--i":
-        main()
-    elif str(sys.argv[1])=="-i":
-        main()
-    elif str(sys.argv[1])=="/interactive":
-        usage()
-    elif str(sys.argv[1])=="/i":
-        usage()
+	elif str(sys.argv[1]) in WordListDecToBin:
+		decimaltobinary()
 
-    elif str(sys.argv[1])=="--ipmasktobin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="--ipmask2bin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="--ipm2b":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="-ipmasktobin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="-ipmask2bin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="-ipm2b":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="/ipmasktobin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="/ipmask2bin":
-        ipAddrAndMasktobin()
-    elif str(sys.argv[1])=="/ipm2b":
-        ipAddrAndMasktobin()
+	elif str(sys.argv[1]) in WordListBinToDec:
+		binarytodecimal()
 
-    elif str(sys.argv[1])=="--iptobin":
-        iptobin()
-    elif str(sys.argv[1])=="--ip2bin":
-        iptobin()
-    elif str(sys.argv[1])=="--i2b":
-        iptobin()
-    elif str(sys.argv[1])=="-iptobin":
-        iptobin()
-    elif str(sys.argv[1])=="-ip2bin":
-        iptobin()
-    elif str(sys.argv[1])=="-i2b":
-        iptobin()
-    elif str(sys.argv[1])=="/iptobin":
-        iptobin()
-    elif str(sys.argv[1])=="/ip2bin":
-        iptobin()
-    elif str(sys.argv[1])=="/i2b":
-        iptobin()
+	elif str(sys.argv[1]) in WordListDecToHex:
+		decimaltohexadecimal()
 
-    elif str(sys.argv[1])=="--bintoip":
-        bintoip()
-    elif str(sys.argv[1])=="--bin2ip":
-        bintoip()
-    elif str(sys.argv[1])=="--b2i":
-        bintoip()
-    elif str(sys.argv[1])=="-bintoip":
-        bintoip()
-    elif str(sys.argv[1])=="-bin2ip":
-        bintoip()
-    elif str(sys.argv[1])=="-b2i":
-        bintoip()
-    elif str(sys.argv[1])=="/bintoip":
-        bintoip()
-    elif str(sys.argv[1])=="/bin2ip":
-        bintoip()
-    elif str(sys.argv[1])=="/b2i":
-        bintoip()
+	elif str(sys.argv[1]) in WordListHexToDec:
+		hexadecimaltodecimal()
 
-    elif str(sys.argv[1])=="--dectobin":
-        dectobin()
-    elif str(sys.argv[1])=="--dec2bin":
-        dectobin()
-    elif str(sys.argv[1])=="--d2b":
-        dectobin()
-    elif str(sys.argv[1])=="-dectobin":
-        dectobin()
-    elif str(sys.argv[1])=="-dec2bin":
-        dectobin()
-    elif str(sys.argv[1])=="-d2b":
-        dectobin()
-    elif str(sys.argv[1])=="/dectobin":
-        dectobin()
-    elif str(sys.argv[1])=="/dec2bin":
-        dectobin()
-    elif str(sys.argv[1])=="/d2b":
-        dectobin()
+	elif str(sys.argv[1]) in WordListIPToBin:
+		ipaddrtobinary()
 
-    elif str(sys.argv[1])=="--bintodec":
-        bintodec()
-    elif str(sys.argv[1])=="--bin2dec":
-        bintodec()
-    elif str(sys.argv[1])=="--b2d":
-        bintodec()
-    elif str(sys.argv[1])=="-bintodec":
-        bintodec()
-    elif str(sys.argv[1])=="-bin2dec":
-        bintodec()
-    elif str(sys.argv[1])=="-b2d":
-        bintodec()
-    elif str(sys.argv[1])=="/bintodec":
-        bintodec()
-    elif str(sys.argv[1])=="/bin2dec":
-        bintodec()
-    elif str(sys.argv[1])=="/b2d":
-        bintodec()
+	elif str(sys.argv[1]) in WordListBinToIP:
+		binarytoipaddr()
 
-    elif str(sys.argv[1])=="--dectohex":
-        dectohex()
-    elif str(sys.argv[1])=="--dec2hex":
-        dectohex()
-    elif str(sys.argv[1])=="--d2h":
-        dectohex()
-    elif str(sys.argv[1])=="-dectohex":
-        dectohex()
-    elif str(sys.argv[1])=="-dec2hex":
-        dectohex()
-    elif str(sys.argv[1])=="-d2h":
-        dectohex()
-    elif str(sys.argv[1])=="/dectohex":
-        dectohex()
-    elif str(sys.argv[1])=="/dec2hex":
-        dectohex()
-    elif str(sys.argv[1])=="/d2h":
-        dectohex()
+	elif str(sys.argv[1]) in WordListMaskToBin:
+		ipaddrtobinary()
 
-    elif str(sys.argv[1])=="--hextodec":
-        hextodec()
-    elif str(sys.argv[1])=="--hex2dec":
-        hextodec()
-    elif str(sys.argv[1])=="--h2d":
-        hextodec()
-    elif str(sys.argv[1])=="-hextodec":
-        hextodec()
-    elif str(sys.argv[1])=="-hex2dec":
-        hextodec()
-    elif str(sys.argv[1])=="-h2d":
-        hextodec()
-    elif str(sys.argv[1])=="/hextodec":
-        hextodec()
-    elif str(sys.argv[1])=="/hex2dec":
-        hextodec()
-    elif str(sys.argv[1])=="/h2d":
-        hextodec()
+	elif str(sys.argv[1]) in WordListBinToMask:
+		binarytoipaddr()
 
-    elif str(sys.argv[1])=="--masktocidr":
-        masktocidr()
-    elif str(sys.argv[1])=="--mask2cidr":
-        masktocidr()
-    elif str(sys.argv[1])=="--m2c":
-        masktocidr()
-    elif str(sys.argv[1])=="-masktocidr":
-        masktocidr()
-    elif str(sys.argv[1])=="-mask2cidr":
-        masktocidr()
-    elif str(sys.argv[1])=="-m2c":
-        masktocidr()
-    elif str(sys.argv[1])=="/masktocidr":
-        masktocidr()
-    elif str(sys.argv[1])=="/mask2cidr":
-        masktocidr()
-    elif str(sys.argv[1])=="/m2c":
-        masktocidr()
+	elif str(sys.argv[1]) in WordListMaskToCIDR:
+		masktocidr()
 
-    elif str(sys.argv[1])=="--cidrtomask":
-        cidrtomask()
-    elif str(sys.argv[1])=="--cidr2mask":
-        cidrtomask()
-    elif str(sys.argv[1])=="--c2m":
-        cidrtomask()
-    elif str(sys.argv[1])=="-cidrtomask":
-        cidrtomask()
-    elif str(sys.argv[1])=="-cidr2mask":
-        cidrtomask()
-    elif str(sys.argv[1])=="-c2m":
-        cidrtomask()
-    elif str(sys.argv[1])=="/cidrtomask":
-        cidrtomask()
-    elif str(sys.argv[1])=="/cidr2mask":
-        cidrtomask()
-    elif str(sys.argv[1])=="/c2m":
-        cidrtomask()
+	elif str(sys.argv[1]) in WordListCIDRToMask:
+		cidrtomask()
 
-    elif str(sys.argv[1])=="--masktowildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="--mask2wildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="--m2w":
-        masktowildcard()
-    elif str(sys.argv[1])=="-masktowildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="-mask2wildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="-m2w":
-        masktowildcard()
-    elif str(sys.argv[1])=="/masktowildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="/mask2wildcard":
-        masktowildcard()
-    elif str(sys.argv[1])=="/m2w":
-        masktowildcard()
+	elif str(sys.argv[1]) in WordListMaskToWildcard:
+		masktowildcardmask()
 
-    elif str(sys.argv[1])=="--wildcardtomask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="--wildcard2mask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="--w2m":
-        wildcardtomask()
-    elif str(sys.argv[1])=="-wildcardtomask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="-wildcard2mask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="-w2m":
-        wildcardtomask()
-    elif str(sys.argv[1])=="/wildcardtomask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="/wildcard2mask":
-        wildcardtomask()
-    elif str(sys.argv[1])=="/w2m":
-        wildcardtomask()
+	elif str(sys.argv[1]) in WordListWildcardToMask:
+		wildcardtomask()
 
-    elif str(sys.argv[1])=="--cidrtowildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="--cidr2wildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="--c2w":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="-cidrtowildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="-cidr2wildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="-c2w":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="/cidrtowildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="/cidr2wildcard":
-        cidrtowildcard()
-    elif str(sys.argv[1])=="/c2w":
-        cidrtowildcard()
+	elif str(sys.argv[1]) in WordListCIDRToWildcard:
+		cidrtowildcard()
 
-    elif str(sys.argv[1])=="--wildcardtocidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="--wildcard2cidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="--w2c":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="-wildcardtocidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="-wildcard2cidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="-w2c":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="/wildcardtocidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="/wildcard2cidr":
-        wildcardtocidr()
-    elif str(sys.argv[1])=="/w2c":
-        wildcardtocidr()
+	elif str(sys.argv[1]) in WordListWildcardToCIDR:
+		wildcardtocidr()
 
-    elif str(sys.argv[1])=="--subnetcalc":
-        subnet_calculator()
-    elif str(sys.argv[1])=="--subnet":
-        subnet_calculator()
-    elif str(sys.argv[1])=="--sc":
-        subnet_calculator()
-    elif str(sys.argv[1])=="-subnetcalc":
-        subnet_calculator()
-    elif str(sys.argv[1])=="-subnet":
-        subnet_calculator()
-    elif str(sys.argv[1])=="-sc":
-        subnet_calculator()
-    elif str(sys.argv[1])=="/subnetcalc":
-        subnet_calculator()
-    elif str(sys.argv[1])=="/subnet":
-        subnet_calculator()
-    elif str(sys.argv[1])=="/sc":
-        subnet_calculator()
-    
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	elif str(sys.argv[1]) in WordListAddrToBin:
+		addrtobinary()
+
+	elif str(sys.argv[1]) in WordListBinToAddr:
+		binarytoaddr()
+
+	elif str(sys.argv[1]) in WordListSubnetCalc:
+		subnetcalculator()
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
 def usage():
-    print("Usage: python3 main.py OPTION")
-    print("")
-    print("OPTIONS:")
-    print("     --help, --usage, -h: display this help message.")
-    print("     -i, --i: interactive mode.")
-    print("")
-    print("ARGS:")
-    print("     --ipmasktobin IP/CIDR: convert an IP address and its mask (or CIDR) into a binary number.")
-    print("")    
-    print("     --iptobin IP: convert an IP address to a binary number.")
-    print("     --bintoip binary-number: convert an IP address in binary format to decimal format.")
-    print("")
-    print("     --dectobin decimal-number: convert a decimal number into a binary number.")
-    print("     --bintodec binary-number: convert a binary number into a decimal number.")
-    print("")
-    print("     --dectohex decimal-number: convert a decimal number into a hexadecimal number.")
-    print("     --hextodec hexa_number: convert a hexadecimal number into a decimal number.")
-    print("")
-    print("     --masktocidr mask: calculate the CIDR of a mask.")
-    print("     --cidrtomask CIDR: calculate the mask from a CIDR.")
-    print("")
-    print("     --masktowildcard mask: convert a mask to wildcard mask.")
-    print("     --wildcardtomask wildcard_mask: convert a wildcard mask to a mask.")
-    print("")
-    print("     --cidrtowildcard mask: convert a mask to wildcard mask.")
-    print("     --wildcardtocidr wildcard_mask: convert a wildcard mask to a mask.")
-    print("")
-    print("     --subnetcalc IP/CIDR: network calculator from an IP/CIDR or IP MASK model.")
-    print("EXAMPLES:")
-    print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
-    print("     python3 ./main.py --dectobin 42")
-    exit(0)
+	clear()
+	print("Usage: python3 main.py OPTION")
+	print("")
+	print("OPTIONS:")
+	print("     --help, -help: display this help message.")
+	print("     --i, -i: interactive mode.")
+	print("")
+	print("ARGS:")
+	print("     --subnetcalc 192.168.0.1/24: simple subnet calculator.")
+	print("")
+	print("     --addrtobin 192.168.0.1/24 or 192.168.0.1 255.255.255.0: convert an IP address and a CIDR or a mask to a binary number.")
+	print("     --bintoaddr 11111111.11111111.11111111.00000000 11111111.11111111.11111111.00000000: convert a binary IP address and a mask to a decimal value.")
+	print("")
+	print("     --iptobin 192.168.0.1: convert an IP address to a binary number.")
+	print("     --bintoip 11000000.10101000.00000000.00000001: convert an IP address in binary format to decimal format.")
+	print("")
+	print("     --masktobin 255.255.255.0: convert a mask to a binary number.")
+	print("     --bintomask 11111111.11111111.11111111.00000000: convert a mask in binary format to decimal format.")
+	print("")
+	print("     --masktocidr 255.255.255.0: convert a mask to a CIDR.")
+	print("     --cidrtomask 24: convert a CIDR to a mask.")
+	print("")
+	print("     --masktowildcard 255.255.255.0: convert a mask to a wildcard mask.")
+	print("     --wildcardtomask 0.0.0.255: convert a wildcard mask to mask.")
+	print("")
+	print("     --cidrtowildcard 24: convert a cidr to a wildcard mask.")
+	print("     --wildcardtocidr 0.0.0.255: convert a wildcard mask to cidr.")
+	print("")
+	print("     --dectobin 42: convert a decimal number into a binary number.")
+	print("     --bintodec 00101010: convert a binary number into a decimal number.")
+	print("")
+	print("     --dectohex 42: convert a decimal number into a hexadecimal number.")
+	print("     --hextodec FF: convert a hexadecimal number into a decimal number.")
+	print("")
+	print("EXAMPLES:")
+	print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
+	print("     python3 ./main.py --dectobin 42")
+	print("")
+	exit(0)
 
 def clear():
     os.system("cls" if os.name=="nt" else "clear")
 
-def dectobin():
-
-    if len(sys.argv)==2:
-        dec_value=input("Enter a decimal number: ")
-        dec_value=int(dec_value)
-        bin_value=bin(dec_value)[2:]
-        bin_complement_value=format(dec_value, '#010b')[2:]
-
-        print("")
-        print("Initial value (decimal):",dec_value)
-        print("Binary value:",bin_value)
-        print("Signed binary number value:",bin_complement_value)
-        exit(0)
-    
-    elif len(sys.argv)==3:
-        dec_value=int(sys.argv[2])
-        dec_value=int(dec_value)
-        bin_value=bin(dec_value)[2:]
-        bin_complement_value=format(dec_value, '#010b')[2:]
-
-        print("Initial value (decimal):",dec_value)
-        print("Binary value:",bin_value)
-        print("Signed binary number value:",bin_complement_value)
-        exit(0)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def bintodec():
-
-    if len(sys.argv)==2:
-        bin_value=input("Enter a binary number: ")
-        new_bin_value="0b"+bin_value
-        dec_value=int(new_bin_value, 2)
-
-        print("")
-        print("Initial value (binary):",bin_value)
-        print("Decimal value:",dec_value)
-        exit(0)
-    
-    elif len(sys.argv)==3:
-        bin_value=(sys.argv[2])
-        new_bin_value="0b"+bin_value
-        dec_value=int(new_bin_value, 2)
-
-        print("Initial value (binary):",bin_value)
-        print("Decimal value:",dec_value)
-        exit(0)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def dectohex():
-
-    if len(sys.argv)==2:
-        dec_value=input("Enter a decimal number: ")
-        dec_value=int(dec_value)
-        hex_value=hex(dec_value)[2:]
-
-        print("")
-        print("Initial value (decimal):",dec_value)
-        print("Hexadecimal value:",hex_value)
-        exit(0)
-    
-    elif len(sys.argv)==3:
-        dec_value=int(sys.argv[2])
-        dec_value=int(dec_value)
-        hex_value=hex(dec_value)[2:]
-
-        print("Initial value (decimal):",dec_value)
-        print("Hexadecimal value:",hex_value)
-        exit(0)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def hextodec():
-
-    if len(sys.argv)==2:
-        hex_value=input("Enter a hexadecimal number: ")
-        new_hex_value="0x"+hex_value
-        dec_value=int(new_hex_value, 16)
-
-        print("")
-        print("Initial value (hexadecimal):",hex_value)
-        print("Decimal value:",dec_value)
-        exit(0)
-    
-    elif len(sys.argv)==3:
-        hex_value=(sys.argv[2])
-        new_hex_value="0x"+hex_value
-        dec_value=int(new_hex_value, 16)
-
-        print("Initial value (hexa):",hex_value)
-        print("Decimal value:",dec_value)
-        exit(0)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def iptobin():
-
-    if len(sys.argv)==2:
-        ip=input("Enter an IP address: ")
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)>4 or len(addr)<4:
-            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-            exit(1)
-    
-        First_Byte_dec=addr[0]
-        Second_Byte_dec=addr[1]
-        Third_Octet_dec=addr[2]
-        Fourth_Octet_dec=addr[3]
-    
-        First_Byte_bin=bin(First_Byte_dec)[2:]
-        Second_Byte_bin=bin(Second_Byte_dec)[2:]
-        Third_Octet_bin=bin(Third_Octet_dec)[2:]
-        Fourth_Octet_bin=bin(Fourth_Octet_dec)[2:]
-    
-        final_bin_value=First_Byte_bin+"."+Second_Byte_bin+"."+Third_Octet_bin+"."+Fourth_Octet_bin
-    
-        First_Byte_bin_complement=format(First_Byte_dec,'#010b')[2:]
-        Second_Byte_bin_complement=format(Second_Byte_dec,'#010b')[2:]
-        Third_Octet_bin_complement=format(Third_Octet_dec,'#010b')[2:]
-        Fourth_Octet_bin_complement=format(Fourth_Octet_dec,'#010b')[2:]
-    
-        final_bin_complement_value=First_Byte_bin_complement+"."+Second_Byte_bin_complement+"."+Third_Octet_bin_complement+"."+Fourth_Octet_bin_complement
-
-        print("")
-        print("Initial value (IP address in decimal):",ip)
-        print("IP address in binary format:",final_bin_value)
-        print("Signed binary number value:",final_bin_complement_value)
-        exit(0)
-
-    elif len(sys.argv)==3:
-        ip=(sys.argv[2])
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)>4 or len(addr)<4:
-            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-            exit(1)
-    
-        First_Byte_dec=addr[0]
-        Second_Byte_dec=addr[1]
-        Third_Octet_dec=addr[2]
-        Fourth_Octet_dec=addr[3]
-    
-        First_Byte_bin=bin(First_Byte_dec)[2:]
-        Second_Byte_bin=bin(Second_Byte_dec)[2:]
-        Third_Octet_bin=bin(Third_Octet_dec)[2:]
-        Fourth_Octet_bin=bin(Fourth_Octet_dec)[2:]
-    
-        final_bin_value=First_Byte_bin+"."+Second_Byte_bin+"."+Third_Octet_bin+"."+Fourth_Octet_bin
-    
-        First_Byte_bin_complement=format(First_Byte_dec,'#010b')[2:]
-        Second_Byte_bin_complement=format(Second_Byte_dec,'#010b')[2:]
-        Third_Octet_bin_complement=format(Third_Octet_dec,'#010b')[2:]
-        Fourth_Octet_bin_complement=format(Fourth_Octet_dec,'#010b')[2:]
-    
-        final_bin_complement_value=First_Byte_bin_complement+"."+Second_Byte_bin_complement+"."+Third_Octet_bin_complement+"."+Fourth_Octet_bin_complement
-
-        print("Initial value (IP address in decimal):",ip)
-        print("IP address in binary format:",final_bin_value)
-        print("Signed binary number value:",final_bin_complement_value)
-        exit(0)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def bintoip():
-
-    if len(sys.argv)==2:
-        ip=input("Enter an IP address in binary format: ")
-
-        Test_Value=ip
-        Test_Value=[str(x) for x in Test_Value.split(" ")]
-        if len(Test_Value)>=2:
-            print("\033[0;31mAn IP address, whether in binary or decimal, cannot contain spaces.\033[00m")
-            exit(1)
-
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)>4 or len(addr)<4:
-            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-            exit(1)
-    
-        First_Byte_bin=addr[0]
-        New_First_Byte_bin="0b"+str(First_Byte_bin)
-        First_Byte_dec=int(New_First_Byte_bin, 2)
-
-        Second_Byte_bin=addr[1]
-        New_Second_Byte_bin="0b"+str(Second_Byte_bin)
-        Second_Byte_dec=int(New_Second_Byte_bin, 2)
-
-        Third_Octet_bin=addr[2]
-        New_Third_Octet_bin="0b"+str(Third_Octet_bin)
-        Third_Octet_dec=int(New_Third_Octet_bin, 2)
-
-        Fourth_Octet_bin=addr[3]
-        New_Fourth_Octet_bin="0b"+str(Fourth_Octet_bin)
-        Fourth_Octet_dec=int(New_Fourth_Octet_bin, 2)
-    
-        final_dec_value=str(First_Byte_dec)+"."+str(Second_Byte_dec)+"."+str(Third_Octet_dec)+"."+str(Fourth_Octet_dec)
-
-        print("")
-        print("Initial value (IP address in binary format):",ip)
-        print("IP address in decimal format:",final_dec_value)
-
-    elif len(sys.argv)==3:
-        ip=(sys.argv[2])
-        addr=[0,0,0,0]
-        addr=ip
-        addr=[int(x) for x in addr.split(".")]
-
-        if len(addr)>4 or len(addr)<4:
-            print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-            exit(1)
-    
-        First_Byte_bin=addr[0]
-        New_First_Byte_bin="0b"+str(First_Byte_bin)
-        First_Byte_dec=int(New_First_Byte_bin, 2)
-
-        Second_Byte_bin=addr[1]
-        New_Second_Byte_bin="0b"+str(Second_Byte_bin)
-        Second_Byte_dec=int(New_Second_Byte_bin, 2)
-
-        Third_Octet_bin=addr[2]
-        New_Third_Octet_bin="0b"+str(Third_Octet_bin)
-        Third_Octet_dec=int(New_Third_Octet_bin, 2)
-
-        Fourth_Octet_bin=addr[3]
-        New_Fourth_Octet_bin="0b"+str(Fourth_Octet_bin)
-        Fourth_Octet_dec=int(New_Fourth_Octet_bin, 2)
-    
-        final_dec_value=str(First_Byte_dec)+"."+str(Second_Byte_dec)+"."+str(Third_Octet_dec)+"."+str(Fourth_Octet_dec)
-
-        print("Initial value (IP address in binary format):",ip)
-        print("IP address in decimal format:",final_dec_value)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-def ipAddrAndMasktobin():
-
-        if len(sys.argv)==2:
-            ipAddrAndMask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
-        
-            addr=[0,0,0,0]
-            addr=ipAddrAndMask
-            cidr=0
-
-            if "/" in ipAddrAndMask:
-                (addr,cidr)=ipAddrAndMask.split('/')
-
-                addr=[int(x) for x in addr.split(".")]
-                cidr=int(cidr)
-                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
-            
-            elif " " in ipAddrAndMask:
-                (addr, mask)=ipAddrAndMask.split(' ')
-
-                addr=[int(x) for x in addr.split(".")]
-                mask=[int(x) for x in mask.split(".")]
-                cidr=sum((bin(x).count('1') for x in mask))
-   
-            else:
-                print("\033[0;31mInvalid arguments have been detected.\033[00m")
-                print("")
-                print("Example of a valid argument expected: <ip/cidr>")
-                print("Example of a valid argument expected: <ip> <mask>")
-                exit(1)
-
-            First_Addr_Byte_dec=addr[0]
-            Second_Addr_Byte_dec=addr[1]
-            Third_Addr_Byte_dec=addr[2]
-            Fourth_Addr_Byte_dec=addr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=mask[0]
-            Second_Mask_Byte_dec=mask[1]
-            Third_Mask_Byte_dec=mask[2]
-            Fourth_Mask_Byte_dec=mask[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-        
-            print("")
-            print("Initial value (IP address and mask in decimal format):",ipAddrAndMask)
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            exit(0)
-
-        elif len(sys.argv)==3:
-
-            ipAddrAndCIDR=(sys.argv[2])
-        
-            addr=[0,0,0,0]
-            addr=ipAddrAndCIDR
-            cidr=0
-
-            if "/" in addr:
-                (addr,cidr)=addr.split('/')
-                addr=[int(x) for x in addr.split(".")]
-                cidr=int(cidr)
-                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
-
-            elif not "/" in addr:
-                print("\033[0;31mInvalid arguments have been detected.\033[00m")
-                print("")
-                print("Example of a valid argument expected: <ip/cidr>")
-                print("Example of a valid argument expected: <ip> <mask>")
-                exit(1)
-
-            else:
-                print("\033[0;31mAn unexpected error was caused.\033[00m")
-                exit(1)
-
-            First_Addr_Byte_dec=addr[0]
-            Second_Addr_Byte_dec=addr[1]
-            Third_Addr_Byte_dec=addr[2]
-            Fourth_Addr_Byte_dec=addr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=mask[0]
-            Second_Mask_Byte_dec=mask[1]
-            Third_Mask_Byte_dec=mask[2]
-            Fourth_Mask_Byte_dec=mask[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-        
-            print("")
-            print("Initial value (IP address and mask in decimal format):",ipAddrAndCIDR)
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            exit(0)
-
-        elif len(sys.argv)==4:
-
-            addr=(sys.argv[2])
-            mask=(sys.argv[3])
-        
-            IpAddr=[0,0,0,0]
-            IpAddr=addr
-
-            MaskAddr=[0,0,0,0]
-            MaskAddr=mask
-
-            cidr=0
-
-            IpAddr=[int(x) for x in IpAddr.split(".")]
-            MaskAddr= [int(x) for x in MaskAddr.split(".")]
-            cidr=sum((bin(x).count('1') for x in MaskAddr))
-
-            if len(IpAddr)>4 or len(IpAddr)<4:
-                print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-                exit(1)
-
-            elif len(MaskAddr)>4 or len(MaskAddr)<4:
-                print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
-                exit(1)
-
-            First_Addr_Byte_dec=IpAddr[0]
-            Second_Addr_Byte_dec=IpAddr[1]
-            Third_Addr_Byte_dec=IpAddr[2]
-            Fourth_Addr_Byte_dec=IpAddr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=MaskAddr[0]
-            Second_Mask_Byte_dec=MaskAddr[1]
-            Third_Mask_Byte_dec=MaskAddr[2]
-            Fourth_Mask_Byte_dec=MaskAddr[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-        
-            print("Initial value (IP address in decimal format):",addr)
-            print("Initial value (Mask in decimal format):",mask)
-            SlideCidr="/"+str(cidr)
-            print("CIDR:",SlideCidr)
-            print("")
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            exit(0)
-
-        elif len(sys.argv)>=5:
-            print("\033[0;31mInvalid arguments have been detected.\033[00m")
-            print("")
-            print("Example of a valid argument expected: <ip/cidr>")
-            print("Example of a valid argument expected: <ip> <mask>")
-            exit(1)
-
-        else:
-            print("\033[0;31mAn unexpected error was caused.\033[00m")
-            exit(1)
+def func_decimaltobinary(x):
+	decimal_value=int(x)
+	binary_value=bin(x)[2:]
+	return binary_value
+
+def func_decimaltobinaryfull(x):
+	decimal_value=int(x)
+	binary_full_value=format(x,'#010b')[2:]
+	return binary_full_value
+
+def decimaltobinary():
+	if len(sys.argv)==2:
+		decimal_value=input("Enter a decimal number: ")
+		decimal_value=int(decimal_value)
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Binary number value:",func_decimaltobinary(decimal_value))
+		print("Signed binary number value:",func_decimaltobinaryfull(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		decimal_value=int(sys.argv[2])
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Binary number value:",func_decimaltobinary(decimal_value))
+		print("Signed binary number value:",func_decimaltobinaryfull(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_binarytodecimal(x):
+	binary_value="0b"+x
+	decimal_value=int(x,2)
+	return decimal_value
+
+def binarytodecimal():
+	if len(sys.argv)==2:
+		binary_value=input("Enter a binary value: ")
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal number value:",func_binarytodecimal(binary_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		binary_value=(sys.argv[2])
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal number value:",func_binarytodecimal(binary_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_decimaltohexadecimal(x):
+	decimal_value=int(x)
+	hexadecimal_value=hex(x)[2:]
+	return hexadecimal_value
+
+def decimaltohexadecimal():
+	if len(sys.argv)==2:
+		decimal_value=input("Enter a decimal value: ")
+		decimal_value=int(decimal_value)
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Hexadecimal number value:",func_decimaltohexadecimal(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		decimal_value=(sys.argv[2])
+		decimal_value=int(decimal_value)
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Hexadecimal number value:",func_decimaltohexadecimal(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_hexadecimaltodecimal(x):
+	hexadecimal_value="0x"+x
+	decimal_value=int(x,16)
+	return decimal_value
+
+def hexadecimaltodecimal():
+	if len(sys.argv)==2:
+		hexadecimal_value=input("Enter a hexadecimal value: ")
+		print("Initial value (hexadecimal):",hexadecimal_value)
+		print("")
+		print("Decimal number value:",func_hexadecimaltodecimal(hexadecimal_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		hexadecimal_value=(sys.argv[2])
+		print("Initial value (hexadecimal):",hexadecimal_value)
+		print("")
+		print("Decimal number value:",func_hexadecimaltodecimal(hexadecimal_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_ipaddrtobinary(x):
+
+	addr=[int(i) for i in x.split(".")]
+	Final_Byte_Binary=bin(addr[0])[2:]+"."+bin(addr[1])[2:]+"."+bin(addr[2])[2:]+"."+bin(addr[3])[2:]
+	return Final_Byte_Binary
+
+def func_ipaddrtobinaryfull(x):
+
+	addr=[int(i) for i in x.split(".")]
+	Final_Byte_Binary=format(addr[0],'#010b')[2:]+"."+format(addr[1],'#010b')[2:]+"."+format(addr[2],'#010b')[2:]+"."+format(addr[3],'#010b')[2:]
+	return Final_Byte_Binary
+
+def ipaddrtobinary():
+	if len(sys.argv)==2:
+		decimal_value=input("Enter a decimal number containing four bytes: ")
+		decimal_value=str(decimal_value)
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Binary number value:",func_ipaddrtobinary(decimal_value))
+		print("Signed binary number value:",func_ipaddrtobinaryfull(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		decimal_value=str(sys.argv[2])
+		print("Initial value (decimal):",decimal_value)
+		print("")
+		print("Binary number value:",func_ipaddrtobinary(decimal_value))
+		print("Signed binary number value:",func_ipaddrtobinaryfull(decimal_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_binarytoipaddr(x):
+
+	addr=[int(i) for i in x.split(".")]
+
+	First_Byte_Binary="0b"+str(addr[0])
+	Second_Byte_Binary="0b"+str(addr[1])
+	Third_Byte_Binary="0b"+str(addr[2])
+	Fourth_Byte_Binary="0b"+str(addr[3])
+
+	Final_First_Byte_Binary=int(First_Byte_Binary,2)
+	Final_Second_Byte_Binary=int(Second_Byte_Binary,2)
+	Final_Third_Byte_Binary=int(Third_Byte_Binary,2)
+	Final_Fourth_Byte_Binary=int(Fourth_Byte_Binary,2)
+
+	decimal_value=str(Final_First_Byte_Binary)+"."+str(Final_Second_Byte_Binary)+"."+str(Final_Third_Byte_Binary)+"."+str(Final_Fourth_Byte_Binary)
+	return decimal_value
+
+def binarytoipaddr():
+	if len(sys.argv)==2:
+		binary_value=input("Enter an IP address in binary format: ")
+		binary_value=str(binary_value)
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal number value:",func_binarytoipaddr(binary_value))
+		exit(0)
+
+	elif len(sys.argv)==3:
+		binary_value=str(sys.argv[2])
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal number value:",func_binarytoipaddr(binary_value))
+		exit(0)
+
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_masktocidr(x):
+
+	addr=[int(i) for i in x.split(".")]
+	cidr=sum((bin(x).count('1') for x in addr))
+	return cidr
 
 def masktocidr():
+	if len(sys.argv)==2:
+		mask=input("Enter a mask: ")
+		mask=str(mask)
+		print("Initial value (decimal):",mask)
+		print("")
+		print("CIDR:",func_masktocidr(mask))
+		exit(0)
 
-    if len(sys.argv)==2:
-        mask=input("Enter a mask: ")
+	elif len(sys.argv)==3:
+		mask=str(sys.argv[2])
+		print("Initial value (decimal):",mask)
+		print("")
+		print("CIDR:",func_masktocidr(mask))
+		exit(0)
 
-        MaskAddr=[0,0,0,0]
-        MaskAddr=mask
-        cidr=0
-        MaskAddr=[int(x) for x in MaskAddr.split(".")]
-        cidr=sum((bin(x).count('1') for x in MaskAddr))
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-        if len(MaskAddr)>4 or len(MaskAddr)<4:
-            print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
-            exit(1)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-        print("")
-        print("Initial value (Mask):",mask)
-        SlideCidr="/"+str(cidr)
-        print("CIDR:",SlideCidr)
+def func_cidrtomask(x):
 
-    elif len(sys.argv)==3:
-        mask=sys.argv[2]
+        cidr=int(x)
 
-        MaskAddr=[0,0,0,0]
-        MaskAddr=mask
-        cidr=0
-        MaskAddr=[int(x) for x in MaskAddr.split(".")]
-        cidr=sum((bin(x).count('1') for x in MaskAddr))
+        mask=[]
+        y=0
+        z=[1]*cidr
+        
+        for i in range(len(z)):
+            math=i%8
+            if math==0:
+                if i>=8:
+                    mask.append(y)
+                    y=0
+            y+=pow(2,7-math)
+        mask.append(y)
+        [mask.append(0) for i in range(4-len(mask))]
+        mask_result=".".join([str(i) for i in mask])
 
-        if len(MaskAddr)>4 or len(MaskAddr)<4:
-            print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
-            exit(1)
-
-        print("Initial value (Mask):",mask)
-        SlideCidr="/"+str(cidr)
-        print("CIDR:",SlideCidr)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+        return mask_result
 
 def cidrtomask():
+	if len(sys.argv)==2:
+		cidr=input("Enter a cidr: ")
+		print("Initial value (CIDR):",cidr)
+		print("")
+		print("Mask:",func_cidrtomask(cidr))
+		exit(0)
 
-    if len(sys.argv)==2:
-        cidr=input("Enter a CIDR: ")
-        cidr=int(cidr)
+	elif len(sys.argv)==3:
+		cidr=str(sys.argv[2])
+		print("Initial value (CIDR):",cidr)
+		print("")
+		print("Mask:",func_cidrtomask(cidr))
+		exit(0)
 
-        mask=[]
-        dat=0
-        ii=[1]*cidr
-        for i in range(len(ii)):
-            math=i%8
-            if math==0:
-                if i>=8:
-                    mask.append(dat)
-                    dat = 0
-            dat+=pow(2,7-math)
-        mask.append(dat)
-        [mask.append(0) for i in range(4 - len(mask))]
-        final_Mask=".".join([str(i) for i in mask])
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-        print("")
-        print("Initial value (CIDR):",cidr)
-        print("Mask:",final_Mask)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    elif len(sys.argv)==3:
-        cidr=sys.argv[2]
-        cidr=int(cidr)
+def func_masktowildcardmask(x):
 
-        mask=[]
-        dat=0
-        ii=[1]*cidr
-        for i in range(len(ii)):
-            math=i%8
-            if math==0:
-                if i>=8:
-                    mask.append(dat)
-                    dat = 0
-            dat+=pow(2,7-math)
-        mask.append(dat)
-        [mask.append(0) for i in range(4 - len(mask))]
-        final_Mask=".".join([str(i) for i in mask])
+	mask=str(x)
+	wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
+	return wildcardmask
 
-        print("")
-        print("Initial value (CIDR):",cidr)
-        print("Mask:",final_Mask)
+def masktowildcardmask():
+	if len(sys.argv)==2:
+		mask=input("Enter a mask: ")
+		mask=str(mask)
+		print("Initial value (Mask):",mask)
+		print("")
+		print("Wildcard mask:",func_masktowildcardmask(mask))
+		exit(0)
 
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
+	elif len(sys.argv)==3:
+		mask=str(sys.argv[2])
+		print("Initial value (Mask):",mask)
+		print("")
+		print("Wildcard mask:",func_masktowildcardmask(mask))
+		exit(0)
 
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-def masktowildcard():
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    if len(sys.argv)==2:
-        mask=input("Enter a mask: ")
+def func_wildcardtomask(x):
 
-        wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
-
-        print("")
-        print("Initial value (Mask):",mask)
-        print("Wildcard mask:",wildcardmask)
-
-    elif len(sys.argv)==3:
-        mask=sys.argv[2]
-
-        wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
-
-        print("Initial value (Mask):",mask)
-        print("Wildcard mask:",wildcardmask)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	wildcardmask=str(x)
+	mask=str(IPv4Address(int(IPv4Address(wildcardmask))^(2**32-1)))
+	return mask
 
 def wildcardtomask():
+	if len(sys.argv)==2:
+		wildcardmask=input("Enter a wildcard mask: ")
+		wildcardmask=str(wildcardmask)
+		print("Initial value (wildcard mask):",wildcardmask)
+		print("")
+		print("Mask:",func_wildcardtomask(wildcardmask))
+		exit(0)
 
-    if len(sys.argv)==2:
-        wildcard=input("Enter a wildcard mask: ")
+	elif len(sys.argv)==3:
+		wildcardmask=str(sys.argv[2])
+		print("Initial value (wildcard mask):",wildcardmask)
+		print("")
+		print("Mask:",func_wildcardtomask(wildcardmask))
+		exit(0)
 
-        mask=str(IPv4Address(int(IPv4Address(wildcard))^(2**32-1)))
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-        print("")
-        print("Initial value (wildcard mask):",wildcard)
-        print("Mask:",mask)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    elif len(sys.argv)==3:
-        wildcard=sys.argv[2]
+def func_cidrtowildcard(x):
 
-        mask=str(IPv4Address(int(IPv4Address(wildcard))^(2**32-1)))
-
-        print("Initial value (wildcard mask):",wildcard)
-        print("Mask:",mask)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	cidr=str(x)
+	cidr=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
+	return cidr
 
 def cidrtowildcard():
+	if len(sys.argv)==2:
+		cidr=input("Enter a CIDR: ")
+		cidr=str(cidr)
+		print("Initial value (CIDR):",cidr)
+		print("")
+		print("Wildcard mask:",func_cidrtowildcard(cidr))
+		exit(0)
 
-    if len(sys.argv)==2:
-        cidr=input("Enter a CIDR: ")
+	elif len(sys.argv)==3:
+		cidr=str(sys.argv[2])
+		print("Initial value (CIDR):",cidr)
+		print("")
+		print("Wildcard mask:",func_cidrtowildcard(cidr))
+		exit(0)
 
-        wildcardmask=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-        print("")
-        print("Initial value (CIDR):",cidr)
-        print("Wildcard mask:",wildcardmask)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    elif len(sys.argv)==3:
-        cidr=sys.argv[2]
+def func_wildcardtocidr(x):
 
-        wildcardmask=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
-
-        print("Initial value (CIDR):",cidr)
-        print("Wildcard mask:",wildcardmask)
-
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
-
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	wildcardmask=str(x)
+	cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
+	return cidr
 
 def wildcardtocidr():
+	if len(sys.argv)==2:
+		wildcardmask=input("Enter a wildcard mask: ")
+		wildcardmask=str(wildcardmask)
+		print("Initial value (wildcard mask):",wildcardmask)
+		print("")
+		print("CIDR:",func_wildcardtocidr(wildcardmask))
+		exit(0)
 
-    if len(sys.argv)==2:
-        wildcardmask=input("Enter a wildcard mask: ")
+	elif len(sys.argv)==3:
+		wildcardmask=str(sys.argv[2])
+		print("Initial value (wildcard mask):",wildcardmask)
+		print("")
+		print("CIDR:",func_wildcardtocidr(wildcardmask))
+		exit(0)
 
-        cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
+	elif len(sys.argv)==4:
+		print("\033[0;31mOnly one argument is expected.\033[00m")
+		exit(1)
 
-        print("")
-        print("Initial value (wildcard mask):",wildcardmask)
-        print("Wildcard mask:",cidr)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    elif len(sys.argv)==3:
-        wildcardmask=sys.argv[2]
+def func_addrtobin(x):
 
-        cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
+	addr=x
 
-        print("Initial value (wildcard mask):",wildcardmask)
-        print("Wildcard mask:",cidr)
+	if "/" in addr:
+		(addr,cidr)=addr.split("/")
+		
+		ipaddr=[int(x) for x in addr.split(".")]
+		cidr=int(cidr)
+		mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
 
-    elif len(sys.argv)>=4:
-        print("\033[0;31mOnly one argument is expected.\033[00m")
-        exit(1)
+		ipaddr=str(ipaddr[0])+"."+str(ipaddr[1])+"."+str(ipaddr[2])+"."+str(ipaddr[3])
+		mask=str(mask[0])+"."+str(mask[1])+"."+str(mask[2])+"."+str(mask[3])
 
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
+	elif " " in addr:
+		(addr, mask)=addr.split(" ")
 
-def subnet_calculator():
+		ipaddr=[int(x) for x in addr.split(".")]
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
 
-        if len(sys.argv)==2:
-            ipAddrAndMask=input("Enter an IP address followed by a mask or a /CIDR (IP MASK or IP/CIDR): ")
-        
-            addr=[0,0,0,0]
-            addr=ipAddrAndMask
-            cidr=0
+		ipaddr=str(ipaddr[0])+"."+str(ipaddr[1])+"."+str(ipaddr[2])+"."+str(ipaddr[3])
+		mask=str(mask[0])+"."+str(mask[1])+"."+str(mask[2])+"."+str(mask[3])
 
-            if "/" in ipAddrAndMask:
-                (addr,cidr)=ipAddrAndMask.split('/')
+	return func_ipaddrtobinary(ipaddr),func_ipaddrtobinary(mask),func_ipaddrtobinaryfull(ipaddr),func_ipaddrtobinaryfull(mask),cidr,mask
 
-                addr=[int(x) for x in addr.split(".")]
-                cidr=int(cidr)
-                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
-            
-            elif " " in ipAddrAndMask:
-                (addr, mask)=ipAddrAndMask.split(' ')
+def addrtobinary():
+	if len(sys.argv)==2:
+		decimal_value=input("Enter an IP address and a subnet mask: ")
+		print("Initial value (decimal):",decimal_value)
+		if "/" in decimal_value:
+			print("Initial mask value (decimal):",func_addrtobin(decimal_value)[5])
+		elif " " in decimal_value:
+			print("Initial CIDR value (decimal):",func_addrtobin(decimal_value)[4])
 
-                addr=[int(x) for x in addr.split(".")]
-                mask=[int(x) for x in mask.split(".")]
-                cidr=sum((bin(x).count('1') for x in mask))
-   
-            else:
-                print("\033[0;31mInvalid arguments have been detected.\033[00m")
-                print("")
-                print("Example of a valid argument expected: <ip/cidr>")
-                print("Example of a valid argument expected: <ip> <mask>")
-                exit(1)
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
+		exit(0)
 
-            First_Addr_Byte_dec=addr[0]
-            Second_Addr_Byte_dec=addr[1]
-            Third_Addr_Byte_dec=addr[2]
-            Fourth_Addr_Byte_dec=addr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=mask[0]
-            Second_Mask_Byte_dec=mask[1]
-            Third_Mask_Byte_dec=mask[2]
-            Fourth_Mask_Byte_dec=mask[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
+	elif len(sys.argv)==3:
+		decimal_value=(sys.argv[2])
+		print("Initial value (decimal):",decimal_value)
+		print("Initial mask value (decimal):",func_addrtobin(decimal_value)[5])
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
+		exit(0)
 
-            # Calculation of the network address.
+	elif len(sys.argv)==4:
+		decimal_value=(sys.argv[2])+" "+(sys.argv[3])
+		print("Initial value (decimal):",decimal_value)
+		print("Initial CIDR value (decimal):",func_addrtobin(decimal_value)[4])
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
+		print("")
+		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
+		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
+		exit(0)
 
-            First_NetwAddr=First_Mask_Byte_bin_complement and First_Addr_Byte_bin_complement
-            Second_NetwAddr=Second_Mask_Byte_bin_complement and Second_Addr_Byte_bin_complement
-            Third_NetwAddr=Third_Mask_Byte_bin_complement and Third_Addr_Byte_bin_complement
-            Fourth_NetwAddr=Fourth_Mask_Byte_bin_complement and Fourth_Addr_Byte_bin_complement
+	elif len(sys.argv)==5:
+		print("\033[0;31mOnly one or two argument is expected.\033[00m")
+		exit(1)
 
-            final_NetwAddr=First_NetwAddr+"."+Second_NetwAddr+"."+Third_NetwAddr+"."+Fourth_NetwAddr
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-            New_First_NetwAddr="0b"+First_Addr_Byte_bin_complement
-            Decimal_New_First_NetwAddr=int(New_First_NetwAddr, 2)
-            New_Second_NetwAddr="0b"+Second_Addr_Byte_bin_complement
-            Decimal_New_Second_NetwAddr=int(New_Second_NetwAddr, 2)
-            New_Third_NetwAddr="0b"+Third_Addr_Byte_bin_complement
-            Decimal_New_Third_NetwAddr=int(New_Third_NetwAddr, 2)
-            New_Fourth_NetwAddr="0b"+Fourth_Addr_Byte_bin_complement
-            Decimal_New_Fourth_NetwAddr=int(New_Fourth_NetwAddr, 2)
+def func_binarytoaddr(x):
 
-            strDecimal_New_First_NetwAddr=str(Decimal_New_First_NetwAddr)
-            strDecimal_New_Second_NetwAddr=str(Decimal_New_Second_NetwAddr)
-            strDecimal_New_Third_NetwAddr=str(Decimal_New_Third_NetwAddr)
-            strDecimal_New_Fourth_NetwAddr=str(Decimal_New_Fourth_NetwAddr)
+		addr=x
+		(addr, mask)=addr.split(" ")
 
-            Decimal_New_final_NetwAddr=strDecimal_New_First_NetwAddr+"."+strDecimal_New_Second_NetwAddr+"."+strDecimal_New_Third_NetwAddr+"."+strDecimal_New_Fourth_NetwAddr
+		addr=func_binarytoipaddr(addr)
+		mask=func_binarytoipaddr(mask)
+		return addr,mask
 
-            # Calculation of the broadcast address.
+def binarytoaddr():
+	if len(sys.argv)==2:
+		binary_value=input("Enter an IP address and a subnet mask in binary format: ")
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal IP number value:",func_binarytoaddr(binary_value)[0])
+		print("Decimal mask number value:",func_binarytoaddr(binary_value)[1])
+		cidr=func_binarytoaddr(binary_value)[1]
+		print("CIDR:",func_masktocidr(cidr))
+		exit(0)
 
-            CalcTmp=First_Mask_Byte_bin_complement+Second_Mask_Byte_bin_complement+Third_Mask_Byte_bin_complement+Fourth_Mask_Byte_bin_complement
-            
-            intCalcTmpNumberOf0=int(CalcTmp.count('0'))
+	elif len(sys.argv)==3:
+		decimal_value=(sys.argv[2])
+		print("\033[0;31mTwo argument is expected.\033[00m")
+		exit(1)
 
-            HostsNumber=2**intCalcTmpNumberOf0-2
-            brAddr=HostsNumber+1
-        
-            print("")
-            print("Initial value (IP address and mask in decimal format):",ipAddrAndMask)
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            print("")
-            print("Network address (decimal):",Decimal_New_final_NetwAddr)
-            print("Network address (binary):",final_NetwAddr)
-            print("Broadcast address:",brAddr)
-            print("")
-            print("Hosts number:",HostsNumber)
+	elif len(sys.argv)==4:
+		binary_value=(sys.argv[2])+" "+(sys.argv[3])
+		print("Initial value (binary):",binary_value)
+		print("")
+		print("Decimal IP number value:",func_binarytoaddr(binary_value)[0])
+		print("Decimal mask number value:",func_binarytoaddr(binary_value)[1])
+		cidr=func_binarytoaddr(binary_value)[1]
+		print("CIDR:",func_masktocidr(cidr))
+		exit(0)
 
-            exit(0)
+	elif len(sys.argv)==5:
+		print("\033[0;31mOnly two argument is expected.\033[00m")
+		exit(1)
 
-        elif len(sys.argv)==3:
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-            ipAddrAndCIDR=(sys.argv[2])
-        
-            addr=[0,0,0,0]
-            addr=ipAddrAndCIDR
-            cidr=0
+def func_subnetcalculator(x):
+	
+	if " " in x:
+		(addr, mask)=x.split(" ")
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
+		ipaddr=str(addr)+"/"+str(cidr)
+		ipaddr=ipaddress.ip_network(ipaddr, strict=False)
 
-            if "/" in addr:
-                (addr,cidr)=addr.split('/')
-                addr=[int(x) for x in addr.split(".")]
-                cidr=int(cidr)
-                mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
+	elif "/" in x:
+		ipaddr=ipaddress.ip_network(x, strict=False)
 
-            elif not "/" in addr:
-                print("\033[0;31mInvalid arguments have been detected.\033[00m")
-                print("")
-                print("Example of a valid argument expected: <ip/cidr>")
-                print("Example of a valid argument expected: <ip> <mask>")
-                exit(1)
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-            else:
-                print("\033[0;31mAn unexpected error was caused.\033[00m")
-                exit(1)
+	mask=ipaddr.netmask
+	size=ipaddr.num_addresses-2
+	firstHost=ipaddr[1]
+	lastHost=ipaddr[size]
+	br=ipaddr.broadcast_address
 
-            First_Addr_Byte_dec=addr[0]
-            Second_Addr_Byte_dec=addr[1]
-            Third_Addr_Byte_dec=addr[2]
-            Fourth_Addr_Byte_dec=addr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=mask[0]
-            Second_Mask_Byte_dec=mask[1]
-            Third_Mask_Byte_dec=mask[2]
-            Fourth_Mask_Byte_dec=mask[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-        
-            print("")
-            print("Initial value (IP address and mask in decimal format):",ipAddrAndCIDR)
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            exit(0)
+	subnets=[]
+	for subnet in ipaddr.subnets(prefixlen_diff=0):
+		subnets.append(subnet)
 
-        elif len(sys.argv)==4:
+	sn=len(subnets)
 
-            addr=(sys.argv[2])
-            mask=(sys.argv[3])
-        
-            IpAddr=[0,0,0,0]
-            IpAddr=addr
+	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets
 
-            MaskAddr=[0,0,0,0]
-            MaskAddr=mask
+def subnetcalculator():
+	if len(sys.argv)==2:
+		ipaddr=input("Enter an IP address and a CIDR or a subnet mask: ")
+		print("Initial value:",ipaddr)
 
-            cidr=0
+		mask=str(func_subnetcalculator(ipaddr)[1])
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
 
-            IpAddr=[int(x) for x in IpAddr.split(".")]
-            MaskAddr= [int(x) for x in MaskAddr.split(".")]
-            cidr=sum((bin(x).count('1') for x in MaskAddr))
+		if "/" in ipaddr:
+			print("Mask:",func_subnetcalculator(ipaddr)[1])
+		elif " " in ipaddr:
+			print("CIDR:", cidr)
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
 
-            if len(IpAddr)>4 or len(IpAddr)<4:
-                print("\033[0;31mAn IP address can only be encoded on four bytes.\033[00m")
-                exit(1)
+		print("")
+		print("Network address:",func_subnetcalculator(ipaddr)[0])
+		print("")
+		print("First host:",func_subnetcalculator(ipaddr)[3])
+		print("Last host:",func_subnetcalculator(ipaddr)[4])
+		print("")
+		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
+		print("")
+		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		exit(0)
 
-            elif len(MaskAddr)>4 or len(MaskAddr)<4:
-                print("\033[0;31mA mask can only be coded on four bytes.\033[00m")
-                exit(1)
+	elif len(sys.argv)==3:
+		ipaddr=(sys.argv[2])
+		print("Initial value:",ipaddr)
+		print("Mask:",func_subnetcalculator(ipaddr)[1])
 
-            First_Addr_Byte_dec=IpAddr[0]
-            Second_Addr_Byte_dec=IpAddr[1]
-            Third_Addr_Byte_dec=IpAddr[2]
-            Fourth_Addr_Byte_dec=IpAddr[3]
-            
-            First_Addr_Byte_bin=bin(First_Addr_Byte_dec)[2:]
-            Second_Addr_Byte_bin=bin(Second_Addr_Byte_dec)[2:]
-            Third_Addr_Byte_bin=bin(Third_Addr_Byte_dec)[2:]
-            Fourth_Addr_Byte_bin=bin(Fourth_Addr_Byte_dec)[2:]
-            
-            final_addr_bin_value=First_Addr_Byte_bin+"."+Second_Addr_Byte_bin+"."+Third_Addr_Byte_bin+"."+Fourth_Addr_Byte_bin
-            
-            First_Addr_Byte_bin_complement=format(First_Addr_Byte_dec, '#010b')[2:]
-            Second_Addr_Byte_bin_complement=format(Second_Addr_Byte_dec, '#010b')[2:]
-            Third_Addr_Byte_bin_complement=format(Third_Addr_Byte_dec, '#010b')[2:]
-            Fourth_Addr_Byte_bin_complement=format(Fourth_Addr_Byte_dec, '#010b')[2:]
-            
-            final_addr_bin_complement_value=First_Addr_Byte_bin_complement+"."+Second_Addr_Byte_bin_complement+"."+Third_Addr_Byte_bin_complement+"."+Fourth_Addr_Byte_bin_complement
-        
-            First_Mask_Byte_dec=MaskAddr[0]
-            Second_Mask_Byte_dec=MaskAddr[1]
-            Third_Mask_Byte_dec=MaskAddr[2]
-            Fourth_Mask_Byte_dec=MaskAddr[3]
-            
-            First_Mask_Byte_bin=bin(First_Mask_Byte_dec)[2:]
-            Second_Mask_Byte_bin=bin(Second_Mask_Byte_dec)[2:]
-            Third_Mask_Byte_bin=bin(Third_Mask_Byte_dec)[2:]
-            Fourth_Mask_Byte_bin=bin(Fourth_Mask_Byte_dec)[2:]
-            
-            final_mask_bin_value=First_Mask_Byte_bin+"."+Second_Mask_Byte_bin+"."+Third_Mask_Byte_bin+"."+Fourth_Mask_Byte_bin
-            
-            First_Mask_Byte_bin_complement=format(First_Mask_Byte_dec, '#010b')[2:]
-            Second_Mask_Byte_bin_complement=format(Second_Mask_Byte_dec, '#010b')[2:]
-            Third_Mask_Byte_bin_complement=format(Third_Mask_Byte_dec, '#010b')[2:]
-            Fourth_Mask_Byte_bin_complement=format(Fourth_Mask_Byte_dec, '#010b')[2:]
-            
-            final_mask_bin_complement_value=First_Mask_Byte_bin_complement+"."+Second_Mask_Byte_bin_complement+"."+Third_Mask_Byte_bin_complement+"."+Fourth_Mask_Byte_bin_complement
-        
-            print("Initial value (IP address in decimal format):",addr)
-            print("Initial value (Mask in decimal format):",mask)
-            SlideCidr="/"+str(cidr)
-            print("CIDR:",SlideCidr)
-            print("")
-            print("IP address in binary format:",final_addr_bin_value)
-            print("Mask in binary format:",final_mask_bin_value)
-            print("")
-            print("Signed binary IP address number value:",final_addr_bin_complement_value)
-            print("Signed binary mask number value:",final_mask_bin_complement_value)
-            exit(0)
+		mask=str(func_subnetcalculator(ipaddr)[1])
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
 
-        elif len(sys.argv)>=5:
-            print("\033[0;31mInvalid arguments have been detected.\033[00m")
-            print("")
-            print("Example of a valid argument expected: <ip/cidr>")
-            print("Example of a valid argument expected: <ip> <mask>")
-            exit(1)
+		print("")
+		print("Network address:",func_subnetcalculator(ipaddr)[0])
+		print("")
+		print("First host:",func_subnetcalculator(ipaddr)[3])
+		print("Last host:",func_subnetcalculator(ipaddr)[4])
+		print("")
+		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
+		print("")
+		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		exit(0)
 
-        else:
-            print("\033[0;31mAn unexpected error was caused.\033[00m")
-            exit(1)
+	elif len(sys.argv)==4:
+		ipaddr=(sys.argv[2])+" "+(sys.argv[3])
+		print("Initial value:",ipaddr)
 
-def main():
-    clear()
-    print("")
-    print("                      ╔╦╗┬ ┬┌─┐  ╔╗╔┌─┐┌┬┐┬ ┬┌─┐┬─┐┬┌─  ")
-    print("                       ║ ├─┤├┤   ║║║├┤  │ ││││ │├┬┘├┴┐  ")
-    print("                       ╩ ┴ ┴└─┘  ╝╚╝└─┘ ┴ └┴┘└─┘┴└─┴ ┴  ")
-    print("                      ╔═╗┌─┐┬  ┌─┐┬ ┬┬  ┌─┐┌┬┐┌─┐┬─┐    ")
-    print("                      ║  ├─┤│  │  │ ││  ├─┤ │ │ │├┬┘    ")
-    print("                      ╚═╝┴ ┴┴─┘└─┘└─┘┴─┘┴ ┴ ┴ └─┘┴└─    ")
-    print("                          ╔╦╗┌─┐┌─┐┬  ┌┐ ┌─┐─┐ ┬        ")
-    print("                           ║ │ ││ ││  ├┴┐│ │┌┴┬┘        ")
-    print("                           ╩ └─┘└─┘┴─┘└─┘└─┘┴ └─        ")
-    print("")
-    print("1 - IP & MASK TO BINARY: Convert an IP address and its mask (or CIDR) into a binary number.")
-    print("")
-    print("2 - IP TO BINARY: Convert an IP address (in decimal format) to a binary number.")
-    print("3 - BINARY TO IP: Convert an IP address (in binary number) to a decimal format.")
-    print("")
-    print("4 - DECIMAL TO BINARY: Convert a decimal number into a binary number.")
-    print("5 - BINARY TO DECIMAL: Convert a binary number into a decimal number.")
-    print("")
-    print("6 - DECIMAL TO HEXADECIMAL: Convert a decimal number into a hexadecimal number.")
-    print("7 - HEXADECIMAL TO DECIMAL: Convert a hexadecimal number into a decimal number.")
-    print("")
-    print("8 - CIDR Calculator (FROM MASK, TO CIDR): Calculate the CIDR of a mask.")
-    print("9 - Convert a CIDR (FROM CIDR, TO MASK): Calculate the mask from a CIDR.")
-    print("")
-    print("10 - MASK TO WILDCARD MASK CALCULATOR: Convert a mask to wildcard mask.")
-    print("11 - WILDCARD MASK TO MASK CALCULATOR: Convert a wildcard mask to a mask.")
-    print("")
-    print("12 - CIDR TO WILDCARD MASK: CONVERT A CIDR TO WILDCARD MASK.")
-    print("13 - WILDCARD TO MASK: Convert a wildcard mask to a mask.")
-    print("")
-    print("0 - Quit the program.")
-    print("")
-    strUserChoice=input("Your choice: ")
-    userChoice=int(strUserChoice)
+		mask=str(func_subnetcalculator(ipaddr)[1])
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
 
-    if userChoice==1:
-        print("")
-        ipAddrAndMasktobin()
+		print("CIDR:", cidr)
 
-    elif userChoice==2:
-        print("")
-        iptobin()
+		print("")
+		print("Network address:",func_subnetcalculator(ipaddr)[0])
+		print("")
+		print("First host:",func_subnetcalculator(ipaddr)[3])
+		print("Last host:",func_subnetcalculator(ipaddr)[4])
+		print("")
+		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
+		print("")
+		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		exit(0)
 
-    elif userChoice==3:
-        print("")
-        bintoip()
+	elif len(sys.argv)==5:
+		print("\033[0;31mOnly two argument is expected.\033[00m")
+		exit(1)
 
-    elif userChoice==4:
-        print("")
-        dectobin()
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
 
-    elif userChoice==5:
-        print("")
-        bintodec()
-
-    elif userChoice==6:
-        print("")
-        dectohex()
-
-    elif userChoice==7:
-        print("")
-        hextodec()
-
-    elif userChoice==8:
-        print("")
-        masktocidr()
-
-    elif userChoice==9:
-        print("")
-        cidrtomask()
-
-    elif userChoice==10:
-        print("")
-        masktowildcard()
-
-    elif userChoice==11:
-        print("")
-        wildcardtomask()
-
-    elif userChoice==12:
-        print("")
-        cidrtowildcard()
-
-    elif userChoice==13:
-        print("")
-        wildcardtocidr()
-
-    elif userChoice==0:
-        print("")
-        print("Exit of the program in progress.")
-        exit(0)
-
-    elif userChoice>13 or userChoice<0:
-        print("\033[0;31mYour answer is not a valid choice.\033[00m")
-        exit(1)
-    
-    else:
-        print("\033[0;31mAn unexpected error was caused.\033[00m")
-        exit(1)
-
-if __name__ == "__main__":
-    Check_UserInput()
+if __name__ == '__main__':
+	Check_UserInput()
