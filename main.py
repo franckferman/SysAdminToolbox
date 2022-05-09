@@ -128,7 +128,7 @@ def usage():
 	print("     --hextodec FF: convert a hexadecimal number into a decimal number.")
 	print("")
 	print("EXAMPLES:")
-	print("     python3 ./main.py --ipmasktobin 192.168.1.42/16")
+	print("     python3 ./main.py --addrtobin 192.168.1.42/16")
 	print("     python3 ./main.py --dectobin 42")
 	print("")
 	exit(0)
