@@ -9,7 +9,6 @@ from ipaddress import IPv4Network
 def Check_UserInput():
 
 	WordListUsage=["--help","-help","--h","-h","/help","/h","--usage","-usage","--u","-u","/usage","/u"]
-	WordListInteractive=["--interactive","-interactive","--i","-i","/interactive","/i"]
 	WordListDecToBin=["--dectobin","--dec2bin","--d2b","-dectobin","-dec2bin","-d2b","/dectobin","/dec2bin","/d2b"]
 	WordListBinToDec=["--bintodec","--bin2dec","--b2d","-bintodec","-bin2dec","-b2d","/bintodec","/bin2dec","/b2d"]
 	WordListDecToHex=["--dectohex","--dec2hex","--d2h","-dectohex","-dec2hex","-d2h","/dectohex","/dec2hex","/d2h"]
@@ -99,7 +98,6 @@ def usage():
 	print("")
 	print("OPTIONS:")
 	print("     --help, -help: display this help message.")
-	print("     --i, -i: interactive mode.")
 	print("")
 	print("ARGS:")
 	print("     --subnetcalc 192.168.0.1/24: simple subnet calculator.")
