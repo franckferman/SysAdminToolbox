@@ -27,8 +27,12 @@ def Check_UserInput():
 	WordListAddrToBin=["--addrtobin","--addr2bin","--a2b","-addrtobin","-addr2bin","-a2b","/addrtobin","/addr2bin","/a2b"]
 	WordListBinToAddr=["--bintoaddr","--bin2addr","--b2a","-bintoaddr","-bin2addr","-b2a","/bintoaddr","/bin2addr","/b2a"]
 	WordListSubnetCalc=["--subnetcalc","--subnet","--sc","-subnetcalc","-subnet","-sc","/subnetcalc","/subnet","/sc"]
+	WordListAdvancedSubnetCalc=["--advancedsubnetcalc","--asubnet","--asc","-advancedsubnetcalc","-asubnet","-asc","/advancedsubnetcalc","/asubnet","/asc"]
 
 	if len(sys.argv)==1:
+		usage()
+
+	elif str(sys.argv[1]) in WordListUsage:
 		usage()
 
 	elif str(sys.argv[1]) in WordListDecToBin:
@@ -81,6 +85,9 @@ def Check_UserInput():
 
 	elif str(sys.argv[1]) in WordListSubnetCalc:
 		subnetcalculator()
+	
+	elif str(sys.argv[1]) in WordListAdvancedSubnetCalc:
+		advancedsubnetcalculator()
 
 	else:
 		print("\033[0;31mAn unexpected error was caused.\033[00m")
@@ -96,6 +103,7 @@ def usage():
 	print("")
 	print("ARGS:")
 	print("     --subnetcalc 192.168.0.1/24: simple subnet calculator.")
+	print("     --advancedsubnetcalc 192.168.0.1/24 25 (ip/original_cidr new_cidr): advanced subnet calculator.")
 	print("")
 	print("     --addrtobin 192.168.0.1/24 or 192.168.0.1 255.255.255.0: convert an IP address and a CIDR or a mask to a binary number.")
 	print("     --bintoaddr 11111111.11111111.11111111.00000000 11111111.11111111.11111111.00000000: convert a binary IP address and a mask to a decimal value.")
@@ -745,6 +753,87 @@ def subnetcalculator():
 	elif len(sys.argv)==5:
 		print("\033[0;31mOnly two argument is expected.\033[00m")
 		exit(1)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+def func_advancedsubnetcalculator(x,y):
+	
+	if " " in x:
+		(addr, mask)=x.split(" ")
+		mask=[int(x) for x in mask.split(".")]
+		cidr=sum((bin(x).count('1') for x in mask))
+		ipaddr=str(addr)+"/"+str(cidr)
+		ipaddr=ipaddress.ip_network(ipaddr, strict=False)
+
+	elif "/" in x:
+		ipaddr=ipaddress.ip_network(x, strict=False)
+
+	else:
+		print("\033[0;31mAn unexpected error was caused.\033[00m")
+		exit(1)
+
+	mask=ipaddr.netmask
+	size=ipaddr.num_addresses-2
+	firstHost=ipaddr[1]
+	lastHost=ipaddr[size]
+	br=ipaddr.broadcast_address
+
+	subnets=[]
+	for subnet in ipaddr.subnets(new_prefix=int(y)):
+		subnets.append(subnet)
+
+	sn=len(subnets)
+
+	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets
+
+def advancedsubnetcalculator():
+	if len(sys.argv)==2:
+		ipaddr=input("Enter an IP address, a CIDR and the new CIDR: ")
+
+		(addr,cidr)=ipaddr.split("/")
+		(addr,newcidr)=ipaddr.split(" ")
+
+		print("Initial value:",str(addr))
+		print("")
+		print("Original network address:",func_advancedsubnetcalculator(addr,newcidr)[0])
+		print("New CIDR:",newcidr)
+		print("")
+		print("First host:",func_advancedsubnetcalculator(addr,newcidr)[3])
+		print("Last host:",func_advancedsubnetcalculator(addr,newcidr)[4])
+		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
+		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
+		print("")
+		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
+		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
+		print("List of subnets:",*sn)
+		exit(0)
+
+	elif len(sys.argv)==3:
+		print("\033[0;31mTwo arguments are expected.\033[00m")
+		exit(1)
+
+	elif len(sys.argv)==4:
+		ipaddr=(sys.argv[2])+" "+(sys.argv[3])
+
+		(addr,cidr)=ipaddr.split("/")
+		(addr,newcidr)=ipaddr.split(" ")
+
+		print("Initial value:",str(addr))
+		print("")
+		print("Original network address:",func_advancedsubnetcalculator(addr,newcidr)[0])
+		print("New CIDR:",newcidr)
+		print("")
+		print("First host:",func_advancedsubnetcalculator(addr,newcidr)[3])
+		print("Last host:",func_advancedsubnetcalculator(addr,newcidr)[4])
+		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
+		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
+		print("")
+		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
+		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
+		print("List of subnets:",*sn)
+		exit(0)
 
 	else:
 		print("\033[0;31mAn unexpected error was caused.\033[00m")
