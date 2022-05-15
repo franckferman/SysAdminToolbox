@@ -25,7 +25,7 @@
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/README.md"><strong>Explore the full documentation »</strong></a>
     <br />
     <br />
-    <a href="https://asciinema.org/a/89042M80fkodhk45SasDXn0Qu">View Demo</a>
+    <a href="https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw">View Demo</a>
     .
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/issues">Report Bug</a>
     ·
@@ -58,7 +58,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-[![asciicast](https://asciinema.org/a/89042M80fkodhk45SasDXn0Qu.svg)](https://asciinema.org/a/89042M80fkodhk45SasDXn0Qu)
+[![asciicast](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw.svg)](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw)
 
 The goal of this project is not to reinvent the wheel. But to my knowledge, no similar tool of this type as complete in Python existed on Github before this one.
 
