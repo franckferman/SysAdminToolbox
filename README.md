@@ -74,33 +74,27 @@ The Network Calculator Toolbox is a tool allowing the realization of numerous ca
 
 <br />Here is an overview of the available features:
 
-- Convert an IP address and its mask (or CIDR) into a binary number.
-
-- Convert an IP address (in decimal format) to a binary number.
-
-- Convert an IP address (in binary number) to a decimal format.
-
+- Simple subnet calculator
+- Advanced subnet calculator
+- Convert an IP address and a CIDR (or a mask) to a binary number.
+- Convert a binary IP address and a mask to a decimal value.
+- Convert an IP address to a binary number.
+- Convert an IP address in binary format to decimal format.
+- Convert a mask to a binary number.
+- Convert a mask in binary format to decimal format.
+- Convert a mask to a CIDR.
+- Convert a CIDR to a mask.
+- Convert a mask to a wildcard mask.
+- Convert a wildcard mask to a mask.
 - Convert a decimal number into a binary number.
-
 - Convert a binary number into a decimal number.
-
 - Convert a decimal number into a hexadecimal number.
-
 - Convert a hexadecimal number into a decimal number.
 
-- Calculate the CIDR of a mask.
+Many other features are under development:
 
-- Calculate the mask from a CIDR.
-
-- Convert a mask to wildcard mask.
-
-- Convert a wildcard mask to a mask.
-
-- CONVERT A CIDR TO WILDCARD MASK.
-
-- Convert a wildcard mask to a mask.
-
-Many other features are under development.
+- VLSM Calculator.
+- VLAN Helper.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
