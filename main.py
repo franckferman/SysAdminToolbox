@@ -6,8 +6,31 @@ import ipaddress
 from ipaddress import IPv4Address
 from ipaddress import IPv4Network
 
-def Check_UserInput():
+def get_banner(my_banner):
+	 def wrapper():
+	 	clear()
+	 	banner="""
+ _____  _           _  _       _                      _    
+|_   _|| |_   ___  | \| | ___ | |_ __ __ __ ___  _ _ | |__ 
+  | |  | ' \ / -_) | .` |/ -_)|  _|\ V  V // _ \| '_|| / / 
+  |_|  |_||_|\___| |_|\_|\___| \__| \_/\_/ \___/|_|  |_\_\ 
+  ___        _            _        _                       
+ / __| __ _ | | __  _  _ | | __ _ | |_  ___  _ _           
+| (__ / _` || |/ _|| || || |/ _` ||  _|/ _ \| '_|          
+ \___|\__,_||_|\__| \_,_||_|\__,_| \__|\___/|_|            
+ _____           _  _                                      
+|_   _|___  ___ | || |__  ___ __ __                        
+  | | / _ \/ _ \| || '_ \/ _ \\ \ /                        
+  |_| \___/\___/|_||_.__/\___//_\_\                        
+"""
+	 	print(banner)
+	 	print("")
+	 	my_banner()
 
+	 return wrapper
+
+@get_banner
+def Check_UserInput():
 	WordListUsage=["--help","-help","--h","-h","/help","/h","--usage","-usage","--u","-u","/usage","/u"]
 	WordListDecToBin=["--dectobin","--dec2bin","--d2b","-dectobin","-dec2bin","-d2b","/dectobin","/dec2bin","/d2b"]
 	WordListBinToDec=["--bintodec","--bin2dec","--b2d","-bintodec","-bin2dec","-b2d","/bintodec","/bin2dec","/b2d"]
@@ -93,7 +116,6 @@ def Check_UserInput():
 		exit(1)
 
 def usage():
-	clear()
 	print("Usage: python3 main.py OPTION")
 	print("")
 	print("OPTIONS:")
@@ -670,6 +692,8 @@ def func_subnetcalculator(x):
 	firstHost=ipaddr[1]
 	lastHost=ipaddr[size]
 	br=ipaddr.broadcast_address
+	is_private=ipaddr.is_private
+	is_global=ipaddr.is_global
 
 	subnets=[]
 	for subnet in ipaddr.subnets(prefixlen_diff=0):
@@ -677,7 +701,7 @@ def func_subnetcalculator(x):
 
 	sn=len(subnets)
 
-	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets
+	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
 
 def subnetcalculator():
 	if len(sys.argv)==2:
@@ -696,6 +720,14 @@ def subnetcalculator():
 			print("\033[0;31mAn unexpected error was caused.\033[00m")
 			exit(1)
 
+		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
+			addrtype="Private"
+		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
+			addrtype="Public"
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
+
 		print("")
 		print("Network address:",func_subnetcalculator(ipaddr)[0])
 		print("")
@@ -705,6 +737,8 @@ def subnetcalculator():
 		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
 		print("")
 		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		print("")
+		print("Type of address:",addrtype)
 		exit(0)
 
 	elif len(sys.argv)==3:
@@ -716,6 +750,14 @@ def subnetcalculator():
 		mask=[int(x) for x in mask.split(".")]
 		cidr=sum((bin(x).count('1') for x in mask))
 
+		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
+			addrtype="Private"
+		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
+			addrtype="Public"
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
+
 		print("")
 		print("Network address:",func_subnetcalculator(ipaddr)[0])
 		print("")
@@ -725,6 +767,8 @@ def subnetcalculator():
 		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
 		print("")
 		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		print("")
+		print("Type of address:",addrtype)
 		exit(0)
 
 	elif len(sys.argv)==4:
@@ -734,6 +778,14 @@ def subnetcalculator():
 		mask=str(func_subnetcalculator(ipaddr)[1])
 		mask=[int(x) for x in mask.split(".")]
 		cidr=sum((bin(x).count('1') for x in mask))
+
+		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
+			addrtype="Private"
+		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
+			addrtype="Public"
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
 
 		print("CIDR:", cidr)
 
@@ -746,6 +798,8 @@ def subnetcalculator():
 		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
 		print("")
 		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
+		print("")
+		print("Type of address:",addrtype)
 		exit(0)
 
 	elif len(sys.argv)==5:
@@ -777,6 +831,8 @@ def func_advancedsubnetcalculator(x,y):
 	firstHost=ipaddr[1]
 	lastHost=ipaddr[size]
 	br=ipaddr.broadcast_address
+	is_private=ipaddr.is_private
+	is_global=ipaddr.is_global
 
 	subnets=[]
 	for subnet in ipaddr.subnets(new_prefix=int(y)):
@@ -784,7 +840,7 @@ def func_advancedsubnetcalculator(x,y):
 
 	sn=len(subnets)
 
-	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets
+	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
 
 def advancedsubnetcalculator():
 	if len(sys.argv)==2:
@@ -792,6 +848,14 @@ def advancedsubnetcalculator():
 
 		(addr,cidr)=ipaddr.split("/")
 		(addr,newcidr)=ipaddr.split(" ")
+
+		if (func_subnetcalculator(addr)[8]==True) and (func_subnetcalculator(addr)[9]==False):
+			addrtype="Private"
+		elif (func_subnetcalculator(addr)[8]==False) and (func_subnetcalculator(addr)[9]==True):
+			addrtype="Public"
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
 
 		print("Initial value:",str(addr))
 		print("")
@@ -802,6 +866,8 @@ def advancedsubnetcalculator():
 		print("Last host:",func_advancedsubnetcalculator(addr,newcidr)[4])
 		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
 		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
+		print("")
+		print("Type of address:",addrtype)
 		print("")
 		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
 		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
@@ -818,6 +884,14 @@ def advancedsubnetcalculator():
 		(addr,cidr)=ipaddr.split("/")
 		(addr,newcidr)=ipaddr.split(" ")
 
+		if (func_subnetcalculator(addr)[8]==True) and (func_subnetcalculator(addr)[9]==False):
+			addrtype="Private"
+		elif (func_subnetcalculator(addr)[8]==False) and (func_subnetcalculator(addr)[9]==True):
+			addrtype="Public"
+		else:
+			print("\033[0;31mAn unexpected error was caused.\033[00m")
+			exit(1)
+
 		print("Initial value:",str(addr))
 		print("")
 		print("Original network address:",func_advancedsubnetcalculator(addr,newcidr)[0])
@@ -828,6 +902,8 @@ def advancedsubnetcalculator():
 		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
 		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
 		print("")
+		print("Type of address:",addrtype)
+		print("")
 		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
 		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
 		print("List of subnets:",*sn)
@@ -836,6 +912,51 @@ def advancedsubnetcalculator():
 	else:
 		print("\033[0;31mAn unexpected error was caused.\033[00m")
 		exit(1)
+
+#def func_vlsmcalculator(x):
+#
+#	if "/" in x:
+#
+#		ipaddrCidrAndVLSM=x.split(" ")
+#		
+#		(ip,cidr)=ipaddrCidrAndVLSM[0].split("/")
+#		
+#		VLSMValues=ipaddrCidrAndVLSM[1:]
+#		SubnetNumbers=VLSMValues[0]
+#		HostsValues=VLSMValues[1:]
+#
+#		#print(ipaddrCidrAndVLSM)
+#		#print(SubnetNumbers)
+#		#print(VLSMValues)
+#		#print(HostsValues)
+#
+#		ipaddr=ipaddress.ip_network(ipaddrCidrAndVLSM[0], strict=False)
+#
+#		if (int(SubnetNumbers)!=len(HostsValues)):
+#			print("\033[0;31mThe number of subnets entered does not match the number of hosts.\033[00m")
+#			exit(1)
+#
+#	else:
+#		print("\033[0;31mAn unexpected error was caused.\033[00m")
+#		exit(1)
+#
+#	mask=ipaddr.netmask
+#	size=ipaddr.num_addresses-2
+#	firstHost=ipaddr[1]
+#	lastHost=ipaddr[size]
+#	br=ipaddr.broadcast_address
+#	is_private=ipaddr.is_private
+#	is_global=ipaddr.is_global
+#
+#	subnets=[]
+#	for subnet in ipaddr.subnets(prefixlen_diff=0):
+#		subnets.append(subnet)
+#
+#	sn=len(subnets)
+#
+#	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
+#
+#print(func_vlsmcalculator("192.168.0.1/24 4 100 50 20 10"))
 
 if __name__ == '__main__':
 	Check_UserInput()
