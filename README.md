@@ -60,13 +60,11 @@
 
 [![asciicast](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw.svg)](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw)
 
-The goal of this project is not to reinvent the wheel. But to my knowledge, no similar tool of this type as complete in Python existed on Github before this one.
+I wanted to make a simple and quick tool to use to perform classic tasks that a network administrator for example would have to perform.
 
-Of course, individually, on the whole, these projects all exist, but I haven't found a simple and quick tool to use to perform classic tasks that a network administrator for example would have to perform.
+I also did this project to consolidate some of my Python knowledge. It is true that learning is much easier with practical cases.
 
-I also did this project to consolidate some of my Python knowledge. It is true that learning is much easier (and deeper) with practical cases, so a project like this was in my opinion a good way to do it although quite simple but useful for me. Link the useful to the pleasant, consolidate my knowledge in Python, make a tool that will be useful to me. Also, as a computer science teacher, this tool will be useful for some of my students.
-
-At the end of the day, the ultimate goal is to achieve time savings and ease of use. 
+At the end, the ultimate goal is to achieve time savings and ease of use. 
 
 Also, I prefer to have my tool (regrouping multiple tools) locally, allowing me to do these tasks, rather than being dependent on multiple tools, being in addition on Internet sites.
 
