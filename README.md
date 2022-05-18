@@ -62,9 +62,9 @@
 
 I wanted to make a simple and quick tool to use to perform classic tasks that a network administrator for example would have to perform.
 
-I also did this project to consolidate some of my Python knowledge. It is true that learning is much easier with practical cases.
+I also did this project to consolidate some of my Python knowledge. Learning is much easier with practical cases.
 
-At the end, the ultimate goal is to achieve time savings and ease of use. 
+At the end, the ultimate goal is to achieve time savings and ease of use.
 
 Also, I prefer to have my tool (regrouping multiple tools) locally, allowing me to do these tasks, rather than being dependent on multiple tools, being in addition on Internet sites.
 
@@ -93,6 +93,7 @@ Many other features are under development:
 
 - VLSM Calculator.
 - VLAN Helper.
+- ACL Helper.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -100,7 +101,7 @@ Many other features are under development:
 
 This program has been tested on different operating systems:
 * - [x] [Microsoft Windows 11 Pro, Python 3](https://www.microsoft.com/en-us/windows/get-windows-11)
-* - [x] [Microsoft Windows 10 Pro, Python 3](https://www.microsoft.com/en-us/d/windows-10-pro/df77x4d43rkt?activetab=pivot:overviewtab)
+* - [x] [Microsoft Windows 10 Pro, Python 3](https://www.microsoft.com/en-us/d/windows-10-pro/df77x4d43rkt)
 * - [x] [Debian 11, Python 3](https://www.debian.org/)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
@@ -108,7 +109,7 @@ This program has been tested on different operating systems:
 <!-- GETTING STARTED -->
 ## Getting Started
 
-This course is not intended to teach you how to use your Windows or Linux terminal. However, I will simply show you (for beginners) how to easily download my script and run it.
+This course is not intended to teach you how to use your Windows or Linux terminal or also Python. However, I will simply show you (for beginners) how to easily download my script and run it.
 
 I don't think a tutorial would be very useful to teach you how to use the script as it was designed to be naturally intuitive, you should be able to find your way around quite easily.
 
@@ -145,7 +146,7 @@ mkdir ./The_Network_Calculator_Toolbox&&curl https://raw.githubusercontent.com/f
 
 * On Windows, to run the program, simply go to the program installation path and run the program:
 ```sh
-Set-Location -Path "C:\";python3.exe;.\main.py
+Set-Location -Path "C:\";python3.exe .\main.py
 ```
 
 * On Linux, to run the program, simply go to the program installation path and run the program:
