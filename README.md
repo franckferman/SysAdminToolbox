@@ -7,7 +7,7 @@
 [![Stargazers][stars-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/stargazers)
 [![Issues][issues-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/issues)
 [![MIT License][license-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/LICENSE)
-[![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/fferman42)
+[![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/franckferman)
 
 </div>
 
@@ -193,5 +193,5 @@ Project Link: [https://github.com/franckferman/The_Network_Calculator_Toolbox](h
 [license-shield]: https://img.shields.io/github/license/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
 [license-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
-[linkedin-url]: https://linkedin.com/in/fferman42
+[linkedin-url]: https://linkedin.com/in/franckferman
 [product-screenshot]: images/screenshot.png
