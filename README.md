@@ -14,7 +14,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
-    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/img/logo.png" alt="Logo" width="500" height="500">
+    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/img/logo.png" alt="Logo" width="200" height="200">
   </a>
 
 <h3 align="center">The Network Calculator Toolbox</h3>
