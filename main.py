@@ -122,7 +122,7 @@ def usage():
 	print("     --help, -help: display this help message.")
 	print("")
 	print("ARGS:")
-	print("     --subnetcalc 192.168.0.1/24: simple subnet calculator.")
+	print("     --subnetcalc 192.168.0.1/24: (ip/cidr): simple subnet calculator.")
 	print("     --advancedsubnetcalc 192.168.0.1/24 25 (ip/original_cidr new_cidr): advanced subnet calculator.")
 	print("")
 	print("     --addrtobin 192.168.0.1/24 or 192.168.0.1 255.255.255.0: convert an IP address and a CIDR or a mask to a binary number.")
@@ -870,8 +870,14 @@ def advancedsubnetcalculator():
 		print("Type of address:",addrtype)
 		print("")
 		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
+
+		(a,b)=addr.split("/")
+		c=a+"/"+newcidr
+		print("Number of hosts per subnet:",func_subnetcalculator(str(c))[2])
+
 		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
 		print("List of subnets:",*sn)
+
 		exit(0)
 
 	elif len(sys.argv)==3:
@@ -906,57 +912,17 @@ def advancedsubnetcalculator():
 		print("")
 		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
 		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
+
+		(a,b)=addr.split("/")
+		c=a+"/"+newcidr
+		print("Number of hosts per subnet:",func_subnetcalculator(str(c))[2])
+
 		print("List of subnets:",*sn)
 		exit(0)
 
 	else:
 		print("\033[0;31mAn unexpected error was caused.\033[00m")
 		exit(1)
-
-#def func_vlsmcalculator(x):
-#
-#	if "/" in x:
-#
-#		ipaddrCidrAndVLSM=x.split(" ")
-#		
-#		(ip,cidr)=ipaddrCidrAndVLSM[0].split("/")
-#		
-#		VLSMValues=ipaddrCidrAndVLSM[1:]
-#		SubnetNumbers=VLSMValues[0]
-#		HostsValues=VLSMValues[1:]
-#
-#		#print(ipaddrCidrAndVLSM)
-#		#print(SubnetNumbers)
-#		#print(VLSMValues)
-#		#print(HostsValues)
-#
-#		ipaddr=ipaddress.ip_network(ipaddrCidrAndVLSM[0], strict=False)
-#
-#		if (int(SubnetNumbers)!=len(HostsValues)):
-#			print("\033[0;31mThe number of subnets entered does not match the number of hosts.\033[00m")
-#			exit(1)
-#
-#	else:
-#		print("\033[0;31mAn unexpected error was caused.\033[00m")
-#		exit(1)
-#
-#	mask=ipaddr.netmask
-#	size=ipaddr.num_addresses-2
-#	firstHost=ipaddr[1]
-#	lastHost=ipaddr[size]
-#	br=ipaddr.broadcast_address
-#	is_private=ipaddr.is_private
-#	is_global=ipaddr.is_global
-#
-#	subnets=[]
-#	for subnet in ipaddr.subnets(prefixlen_diff=0):
-#		subnets.append(subnet)
-#
-#	sn=len(subnets)
-#
-#	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
-#
-#print(func_vlsmcalculator("192.168.0.1/24 4 100 50 20 10"))
 
 if __name__ == '__main__':
 	Check_UserInput()
