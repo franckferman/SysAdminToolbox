@@ -100,9 +100,9 @@ Many other features are under development:
 ### Tested On
 
 This program has been tested on different operating systems:
-* - [x] [Microsoft Windows 11 Pro, Python 3](https://www.microsoft.com/en-us/windows/get-windows-11)
-* - [x] [Microsoft Windows 10 Pro, Python 3](https://www.microsoft.com/en-us/d/windows-10-pro/df77x4d43rkt)
-* - [x] [Debian 11, Python 3](https://www.debian.org/)
+* - [x] [Microsoft Windows 11 Pro](https://www.microsoft.com/en-us/windows/get-windows-11), [Python 3](https://www.python.org/)
+* - [x] [Microsoft Windows 10 Pro](https://www.microsoft.com/en-us/d/windows-10-pro/df77x4d43rkt), [Python 3](https://www.python.org/)
+* - [x] [Debian 11](https://www.debian.org/), [Python 3](https://www.python.org/)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
