@@ -72,8 +72,8 @@ The Network Calculator Toolbox is a tool allowing the realization of numerous ca
 
 <br />Here is an overview of the available features:
 
-- Simple subnet calculator
-- Advanced subnet calculator
+- Simple subnet calculator.
+- Advanced subnet calculator.
 - Convert an IP address and a CIDR (or a mask) to a binary number.
 - Convert a binary IP address and a mask to a decimal value.
 - Convert an IP address to a binary number.
