@@ -1,977 +1,460 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#----------------------------------------------------------------------------
+# Author: FERMAN Franck (https://franckferman.fr, https://github.com/franckferman)
+# ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
 import sys
-from sys import argv
-import os
-from os import system
+import argparse
 import ipaddress
-from ipaddress import IPv4Address
-from ipaddress import IPv4Network
-
-def get_banner(my_banner):
-	 def wrapper():
-	 	clear()
-	 	banner="""
- _____  _           _  _       _                      _    
-|_   _|| |_   ___  | \| | ___ | |_ __ __ __ ___  _ _ | |__ 
-  | |  | ' \ / -_) | .` |/ -_)|  _|\ V  V // _ \| '_|| / / 
-  |_|  |_||_|\___| |_|\_|\___| \__| \_/\_/ \___/|_|  |_\_\ 
-  ___        _            _        _                       
- / __| __ _ | | __  _  _ | | __ _ | |_  ___  _ _           
-| (__ / _` || |/ _|| || || |/ _` ||  _|/ _ \| '_|          
- \___|\__,_||_|\__| \_,_||_|\__,_| \__|\___/|_|            
- _____           _  _                                      
-|_   _|___  ___ | || |__  ___ __ __                        
-  | | / _ \/ _ \| || '_ \/ _ \\ \ /                        
-  |_| \___/\___/|_||_.__/\___//_\_\                        
-"""
-	 	print(banner)
-	 	print("")
-	 	my_banner()
-
-	 return wrapper
-
-@get_banner
-def Check_UserInput():
-	WordListUsage=["--help","-help","--h","-h","/help","/h","--usage","-usage","--u","-u","/usage","/u"]
-	WordListDecToBin=["--dectobin","--dec2bin","--d2b","-dectobin","-dec2bin","-d2b","/dectobin","/dec2bin","/d2b"]
-	WordListBinToDec=["--bintodec","--bin2dec","--b2d","-bintodec","-bin2dec","-b2d","/bintodec","/bin2dec","/b2d"]
-	WordListDecToHex=["--dectohex","--dec2hex","--d2h","-dectohex","-dec2hex","-d2h","/dectohex","/dec2hex","/d2h"]
-	WordListHexToDec=["--hextodec","--hex2dec","--h2d","-hextodec","-hex2dec","-h2d","/hextodec","/hex2dec","/h2d"]
-	WordListIPToBin=["--iptobin","--ip2bin","--i2b","-iptobin","-ip2bin","-i2b","/iptobin","/ip2bin","/i2b"]
-	WordListBinToIP=["--bintoip","--bin2ip","--b2i","-bintoip","-bin2ip","-b2i","/bintoip","/bin2ip","/b2i"]
-	WordListMaskToBin=["--masktobin","--mask2bin","--m2b","-masktobin","-mask2bin","-m2b","/masktobin","/mask2bin","/m2b"]
-	WordListBinToMask=["--bintomask","--bin2mask","--b2m","-bintomask","-bin2mask","-b2m","/bintomask","/bin2mask","/b2m"]
-	WordListMaskToCIDR=["--masktocidr","--mask2cidr","--m2c","-masktocidr","-mask2cidr","-m2c","/masktocidr","/mask2cidr","/m2c"]
-	WordListCIDRToMask=["--cidrtomask","--cidr2mask","--c2m","-cidrtomask","-cidr2mask","-c2m","/cidrtomask","/cidr2mask","/c2m"]
-	WordListMaskToWildcard=["--masktowildcard","--mask2wildcard","--m2w","-masktowildcard","-mask2wildcard","-m2w","/masktowildcard","/mask2wildcard","/m2w"]
-	WordListWildcardToMask=["--wildcardtomask","--wildcard2mask","--w2m","-wildcardtomask","-wildcard2mask","-w2m","/wildcardtomask","/wildcard2mask","/w2m"]
-	WordListCIDRToWildcard=["--cidrtowildcard","--cidr2wildcard","--c2w","-cidrtowildcard","-cidr2wildcard","-c2w","/cidrtowildcard","/cidr2wildcard","/c2w"]
-	WordListWildcardToCIDR=["--wildcardtocidr","--wildcard2cidr","--w2c","-wildcardtocidr","-wildcard2cidr","-w2c","/wildcardtocidr","/wildcard2cidr","/w2c"]
-	WordListAddrToBin=["--addrtobin","--addr2bin","--a2b","-addrtobin","-addr2bin","-a2b","/addrtobin","/addr2bin","/a2b"]
-	WordListBinToAddr=["--bintoaddr","--bin2addr","--b2a","-bintoaddr","-bin2addr","-b2a","/bintoaddr","/bin2addr","/b2a"]
-	WordListSubnetCalc=["--subnetcalc","--subnet","--sc","-subnetcalc","-subnet","-sc","/subnetcalc","/subnet","/sc"]
-	WordListAdvancedSubnetCalc=["--advancedsubnetcalc","--asubnet","--asc","-advancedsubnetcalc","-asubnet","-asc","/advancedsubnetcalc","/asubnet","/asc"]
-
-	if len(sys.argv)==1:
-		usage()
-
-	elif str(sys.argv[1]) in WordListUsage:
-		usage()
-
-	elif str(sys.argv[1]) in WordListDecToBin:
-		decimaltobinary()
-
-	elif str(sys.argv[1]) in WordListBinToDec:
-		binarytodecimal()
-
-	elif str(sys.argv[1]) in WordListDecToHex:
-		decimaltohexadecimal()
-
-	elif str(sys.argv[1]) in WordListHexToDec:
-		hexadecimaltodecimal()
-
-	elif str(sys.argv[1]) in WordListIPToBin:
-		ipaddrtobinary()
-
-	elif str(sys.argv[1]) in WordListBinToIP:
-		binarytoipaddr()
-
-	elif str(sys.argv[1]) in WordListMaskToBin:
-		ipaddrtobinary()
-
-	elif str(sys.argv[1]) in WordListBinToMask:
-		binarytoipaddr()
-
-	elif str(sys.argv[1]) in WordListMaskToCIDR:
-		masktocidr()
-
-	elif str(sys.argv[1]) in WordListCIDRToMask:
-		cidrtomask()
-
-	elif str(sys.argv[1]) in WordListMaskToWildcard:
-		masktowildcardmask()
-
-	elif str(sys.argv[1]) in WordListWildcardToMask:
-		wildcardtomask()
-
-	elif str(sys.argv[1]) in WordListCIDRToWildcard:
-		cidrtowildcard()
-
-	elif str(sys.argv[1]) in WordListWildcardToCIDR:
-		wildcardtocidr()
-
-	elif str(sys.argv[1]) in WordListAddrToBin:
-		addrtobinary()
-
-	elif str(sys.argv[1]) in WordListBinToAddr:
-		binarytoaddr()
-
-	elif str(sys.argv[1]) in WordListSubnetCalc:
-		subnetcalculator()
-	
-	elif str(sys.argv[1]) in WordListAdvancedSubnetCalc:
-		advancedsubnetcalculator()
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def usage():
-	print("Usage: python3 main.py OPTION")
-	print("")
-	print("OPTIONS:")
-	print("     --help, -help: display this help message.")
-	print("")
-	print("OPTIONS/ARGS:")
-	print("     --subnetcalc 192.168.0.1/24: (ip/cidr): simple subnet calculator.")
-	print("     --advancedsubnetcalc 192.168.0.1/24 25 (ip/original_cidr new_cidr): advanced subnet calculator.")
-	print("")
-	print("     --addrtobin 192.168.0.1/24 or 192.168.0.1 255.255.255.0: convert an IP address and a CIDR or a mask to a binary number.")
-	print("     --bintoaddr 11111111.11111111.11111111.00000000 11111111.11111111.11111111.00000000: convert a binary IP address and a mask to a decimal value.")
-	print("")
-	print("     --iptobin 192.168.0.1: convert an IP address to a binary number.")
-	print("     --bintoip 11000000.10101000.00000000.00000001: convert an IP address in binary format to decimal format.")
-	print("")
-	print("     --masktobin 255.255.255.0: convert a mask to a binary number.")
-	print("     --bintomask 11111111.11111111.11111111.00000000: convert a mask in binary format to decimal format.")
-	print("")
-	print("     --masktocidr 255.255.255.0: convert a mask to a CIDR.")
-	print("     --cidrtomask 24: convert a CIDR to a mask.")
-	print("")
-	print("     --masktowildcard 255.255.255.0: convert a mask to a wildcard mask.")
-	print("     --wildcardtomask 0.0.0.255: convert a wildcard mask to mask.")
-	print("")
-	print("     --cidrtowildcard 24: convert a cidr to a wildcard mask.")
-	print("     --wildcardtocidr 0.0.0.255: convert a wildcard mask to cidr.")
-	print("")
-	print("     --dectobin 42: convert a decimal number into a binary number.")
-	print("     --bintodec 00101010: convert a binary number into a decimal number.")
-	print("")
-	print("     --dectohex 42: convert a decimal number into a hexadecimal number.")
-	print("     --hextodec FF: convert a hexadecimal number into a decimal number.")
-	print("")
-	print("EXAMPLES:")
-	print("     python ./main.py --advancedsubnetcalc 192.168.0.1/24 25")
-	print("     python ./main.py --addrtobin 192.168.0.1/24")
-	print("     python ./main.py --cidrtowildcard 24")
-	print("")
-	exit(0)
-
-def clear():
-    os.system("cls" if os.name=="nt" else "clear")
-
-def func_decimaltobinary(x):
-	decimal_value=int(x)
-	binary_value=bin(x)[2:]
-	return binary_value
-
-def func_decimaltobinaryfull(x):
-	decimal_value=int(x)
-	binary_full_value=format(x,'#010b')[2:]
-	return binary_full_value
-
-def decimaltobinary():
-	if len(sys.argv)==2:
-		decimal_value=input("Enter a decimal number: ")
-		decimal_value=int(decimal_value)
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Binary number value:",func_decimaltobinary(decimal_value))
-		print("Signed binary number value:",func_decimaltobinaryfull(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		decimal_value=int(sys.argv[2])
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Binary number value:",func_decimaltobinary(decimal_value))
-		print("Signed binary number value:",func_decimaltobinaryfull(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_binarytodecimal(x):
-	binary_value="0b"+x
-	decimal_value=int(x,2)
-	return decimal_value
-
-def binarytodecimal():
-	if len(sys.argv)==2:
-		binary_value=input("Enter a binary value: ")
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal number value:",func_binarytodecimal(binary_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		binary_value=(sys.argv[2])
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal number value:",func_binarytodecimal(binary_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_decimaltohexadecimal(x):
-	decimal_value=int(x)
-	hexadecimal_value=hex(x)[2:]
-	return hexadecimal_value
-
-def decimaltohexadecimal():
-	if len(sys.argv)==2:
-		decimal_value=input("Enter a decimal value: ")
-		decimal_value=int(decimal_value)
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Hexadecimal number value:",func_decimaltohexadecimal(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		decimal_value=(sys.argv[2])
-		decimal_value=int(decimal_value)
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Hexadecimal number value:",func_decimaltohexadecimal(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_hexadecimaltodecimal(x):
-	hexadecimal_value="0x"+x
-	decimal_value=int(x,16)
-	return decimal_value
-
-def hexadecimaltodecimal():
-	if len(sys.argv)==2:
-		hexadecimal_value=input("Enter a hexadecimal value: ")
-		print("Initial value (hexadecimal):",hexadecimal_value)
-		print("")
-		print("Decimal number value:",func_hexadecimaltodecimal(hexadecimal_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		hexadecimal_value=(sys.argv[2])
-		print("Initial value (hexadecimal):",hexadecimal_value)
-		print("")
-		print("Decimal number value:",func_hexadecimaltodecimal(hexadecimal_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_ipaddrtobinary(x):
-
-	addr=[int(i) for i in x.split(".")]
-	Final_Byte_Binary=bin(addr[0])[2:]+"."+bin(addr[1])[2:]+"."+bin(addr[2])[2:]+"."+bin(addr[3])[2:]
-	return Final_Byte_Binary
-
-def func_ipaddrtobinaryfull(x):
-
-	addr=[int(i) for i in x.split(".")]
-	Final_Byte_Binary=format(addr[0],'#010b')[2:]+"."+format(addr[1],'#010b')[2:]+"."+format(addr[2],'#010b')[2:]+"."+format(addr[3],'#010b')[2:]
-	return Final_Byte_Binary
-
-def ipaddrtobinary():
-	if len(sys.argv)==2:
-		decimal_value=input("Enter a decimal number containing four bytes: ")
-		decimal_value=str(decimal_value)
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Binary number value:",func_ipaddrtobinary(decimal_value))
-		print("Signed binary number value:",func_ipaddrtobinaryfull(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		decimal_value=str(sys.argv[2])
-		print("Initial value (decimal):",decimal_value)
-		print("")
-		print("Binary number value:",func_ipaddrtobinary(decimal_value))
-		print("Signed binary number value:",func_ipaddrtobinaryfull(decimal_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_binarytoipaddr(x):
-
-	addr=[int(i) for i in x.split(".")]
-
-	First_Byte_Binary="0b"+str(addr[0])
-	Second_Byte_Binary="0b"+str(addr[1])
-	Third_Byte_Binary="0b"+str(addr[2])
-	Fourth_Byte_Binary="0b"+str(addr[3])
-
-	Final_First_Byte_Binary=int(First_Byte_Binary,2)
-	Final_Second_Byte_Binary=int(Second_Byte_Binary,2)
-	Final_Third_Byte_Binary=int(Third_Byte_Binary,2)
-	Final_Fourth_Byte_Binary=int(Fourth_Byte_Binary,2)
-
-	decimal_value=str(Final_First_Byte_Binary)+"."+str(Final_Second_Byte_Binary)+"."+str(Final_Third_Byte_Binary)+"."+str(Final_Fourth_Byte_Binary)
-	return decimal_value
-
-def binarytoipaddr():
-	if len(sys.argv)==2:
-		binary_value=input("Enter an IP address in binary format: ")
-		binary_value=str(binary_value)
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal number value:",func_binarytoipaddr(binary_value))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		binary_value=str(sys.argv[2])
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal number value:",func_binarytoipaddr(binary_value))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_masktocidr(x):
-
-	addr=[int(i) for i in x.split(".")]
-	cidr=sum((bin(x).count('1') for x in addr))
+
+# ---------------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------------
+class color:
+   GREEN='\033[92m'
+   RED='\033[91m'
+   BOLD='\033[1m'
+   DEFAULT='\033[0m'
+
+
+# ---------------------------------------------------------------------------
+# argparse
+# ---------------------------------------------------------------------------
+parser=argparse.ArgumentParser(description=' The Network Calculator Toolbox is a tool allowing the realization of numerous calculations dedicated essentially to the network administration.')
+parser.add_argument("--dectobin","--dec2bin","--d2b",help="Convert a decimal number to binary.",
+	type=int,default=None)
+parser.add_argument("--bintodec","--bin2dec","--b2d",help="Convert a binary number to decimal.",
+	type=int,default=None)
+parser.add_argument("--dectohex","--dec2hex","--d2h",help="Convert a decimal number to hexadecimal.",
+	type=int,default=None)
+parser.add_argument("--hextodec","--hex2dec","--h2d",help="Convert a hexadecimal number to decimal.",
+	type=str,default=None)
+parser.add_argument("--bintohex","--bin2hex","--b2h",help="Convert a binary number to hexadecimal.",
+	type=int,default=None)
+parser.add_argument("--hextobin","--hex2bin","--h2b",help="Convert a hexadecimal number to binary.",
+	type=str,default=None)
+parser.add_argument("--iptobin","--ip2bin","--i2b",help="Convert an IP in decimal format to binary format.",
+	type=str,default=None)
+parser.add_argument("--bintoip","--bin2ip","--b2i",help="Convert an IP in binary format to decimal format.",
+	type=str,default=None)
+parser.add_argument("--masktobin","--mask2bin","--m2b",help="Convert a mask in decimal format to binary format.",
+	type=str,default=None)
+parser.add_argument("--bintomask","--bin2mask","--b2m",help="Convert a mask in binary format to decimal format.",
+	type=str,default=None)
+parser.add_argument("--masktocidr","--mask2cidr","--m2c",help="Convert a mask to CIDR.",
+	type=str,default=None)
+parser.add_argument("--cidrtomask","--cidr2mask","--c2m",help="Convert a CIDR to mask.",
+	type=str,default=None)
+parser.add_argument("--masktowildcard","--mask2wildcard","--m2w",help="Convert a mask to wildcard mask.",
+	type=str,default=None)
+parser.add_argument("--wildcardtomask","--wildcard2mask","--w2m",help="Convert a wildcard mask to mask.",
+	type=str,default=None)
+parser.add_argument("--cidrtowildcard","--cidr2wildcard","--c2w",help="Convert a CIDR to mask.",
+	type=str,default=None)
+parser.add_argument("--wildcardtocidr","--wildcard2cidr","--w2c",help="Convert a wildcard mask to CIDR.",
+	type=str,default=None)
+parser.add_argument("--addrtobin","--addr2bin","--a2b",help="Convert an IP address (IP/CIDR or IP MASK) in binary format to decimal format.",
+	type=str,default=None,nargs='+')
+parser.add_argument("--bintoaddr","--bin2addr","--b2a",help="Convert an IP address in binary format to decimal format.",
+	type=str,default=None,nargs='+')
+parser.add_argument("--subnetcalc","--subnet","--sc",help="simple subnet calculator.",
+	type=str,default=None,nargs='+')
+parser.add_argument("--advancedsubnetcalc","--asubnet","--asc",help="advanced subnet calculator.",
+	type=str,default=None,nargs='+')
+args=parser.parse_args()
+
+
+def decimal_to_binary(number):
+	decimal=int(number)
+	binary=bin(decimal)[2:]
+	signed_binary=format(decimal,'#010b')[2:]
+	return binary,signed_binary
+
+
+def binary_to_decimal(user_input):
+	binary="0b"+str(user_input)
+	decimal=int(binary,2)
+	return decimal
+
+
+def decimal_to_hexadecimal(number):
+	decimal=int(number)
+	hexadecimal=hex(decimal)[2:]
+	return hexadecimal
+
+
+def hexadecimal_to_decimal(hexa):
+	hexadecimal=str("0x")+hexa
+	decimal=int(hexadecimal,16)
+	return decimal
+
+
+def binary_to_hexadecimal(user_input):
+	decimal=binary_to_decimal(user_input)
+	hexadecimal=decimal_to_hexadecimal(decimal)
+	return hexadecimal
+
+
+def hexadecimal_to_binary(user_input):
+	decimal=hexadecimal_to_decimal(user_input)
+	binary=decimal_to_binary(decimal)
+	return binary
+
+
+def ip_to_binary(ip):
+	addr=[int(byte) for byte in ip.split('.')]
+	binary=bin(addr[0])[2:]+'.'+bin(addr[1])[2:]+'.'+bin(addr[2])[2:]+'.'+bin(addr[3])[2:]
+	signed_binary=format(addr[0],'#010b')[2:]+'.'+format(addr[1],'#010b')[2:]+'.'+format(addr[2],'#010b')[2:]+'.'+format(addr[3],'#010b')[2:]
+	return binary,signed_binary
+
+
+def binary_to_ip(ip):
+	addr=[int(byte) for byte in ip.split('.')]
+
+	first_byte="0b"+str(addr[0])
+	second_byte="0b"+str(addr[1])
+	third_byte="0b"+str(addr[2])
+	fourth_byte="0b"+str(addr[3])
+
+	first_binary_byte=int(first_byte,2)
+	second_binary_byte=int(second_byte,2)
+	third_binary_byte=int(third_byte,2)
+	fourth_binary_byte=int(fourth_byte,2)
+
+	decimal=str(first_binary_byte)+'.'+str(second_binary_byte)+'.'+str(third_binary_byte)+'.'+str(fourth_binary_byte)
+	return decimal
+
+
+def mask_to_binary(mask):
+	binary=ip_to_binary(mask)
+	return binary
+
+
+def binary_to_mask(binary):
+	decimal=binary_to_ip(binary)
+	return decimal
+
+
+def mask_to_cidr(mask):
+	addr=[int(byte) for byte in mask.split('.')]
+	cidr=sum((bin(mask).count('1') for mask in addr))
 	return cidr
 
-def masktocidr():
-	if len(sys.argv)==2:
-		mask=input("Enter a mask: ")
-		mask=str(mask)
-		print("Initial value (decimal):",mask)
-		print("")
-		print("CIDR:",func_masktocidr(mask))
-		exit(0)
 
-	elif len(sys.argv)==3:
-		mask=str(sys.argv[2])
-		print("Initial value (decimal):",mask)
-		print("")
-		print("CIDR:",func_masktocidr(mask))
-		exit(0)
+def cidr_to_mask(cidr_input):
+    cidr=int(cidr_input)
+    mask=[]
+    y=0
+    z=[1]*cidr
 
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
+    for i in range(len(z)):
+        math=i%8
+        if math==0:
+            if i>=8:
+                mask.append(y)
+                y=0
+        y+=pow(2,7-math)
+    mask.append(y)
+    [mask.append(0) for i in range(4-len(mask))]
+    mask=".".join([str(i) for i in mask])
+    return mask
 
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
 
-def func_cidrtomask(x):
+def mask_to_wildcard(mask_input):
+	mask=str(mask_input)
+	wildcard_mask=str(ipaddress.IPv4Address(int(ipaddress.IPv4Address(mask))^(2**32-1)))
+	return wildcard_mask
 
-        cidr=int(x)
 
-        mask=[]
-        y=0
-        z=[1]*cidr
-        
-        for i in range(len(z)):
-            math=i%8
-            if math==0:
-                if i>=8:
-                    mask.append(y)
-                    y=0
-            y+=pow(2,7-math)
-        mask.append(y)
-        [mask.append(0) for i in range(4-len(mask))]
-        mask_result=".".join([str(i) for i in mask])
-
-        return mask_result
-
-def cidrtomask():
-	if len(sys.argv)==2:
-		cidr=input("Enter a cidr: ")
-		print("Initial value (CIDR):",cidr)
-		print("")
-		print("Mask:",func_cidrtomask(cidr))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		cidr=str(sys.argv[2])
-		print("Initial value (CIDR):",cidr)
-		print("")
-		print("Mask:",func_cidrtomask(cidr))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_masktowildcardmask(x):
-
-	mask=str(x)
-	wildcardmask=str(IPv4Address(int(IPv4Address(mask))^(2**32-1)))
-	return wildcardmask
-
-def masktowildcardmask():
-	if len(sys.argv)==2:
-		mask=input("Enter a mask: ")
-		mask=str(mask)
-		print("Initial value (Mask):",mask)
-		print("")
-		print("Wildcard mask:",func_masktowildcardmask(mask))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		mask=str(sys.argv[2])
-		print("Initial value (Mask):",mask)
-		print("")
-		print("Wildcard mask:",func_masktowildcardmask(mask))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_wildcardtomask(x):
-
-	wildcardmask=str(x)
-	mask=str(IPv4Address(int(IPv4Address(wildcardmask))^(2**32-1)))
+def wildcard_to_mask(wildcard_input):
+	mask=mask_to_wildcard(wildcard_input)
 	return mask
 
-def wildcardtomask():
-	if len(sys.argv)==2:
-		wildcardmask=input("Enter a wildcard mask: ")
-		wildcardmask=str(wildcardmask)
-		print("Initial value (wildcard mask):",wildcardmask)
-		print("")
-		print("Mask:",func_wildcardtomask(wildcardmask))
-		exit(0)
 
-	elif len(sys.argv)==3:
-		wildcardmask=str(sys.argv[2])
-		print("Initial value (wildcard mask):",wildcardmask)
-		print("")
-		print("Mask:",func_wildcardtomask(wildcardmask))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_cidrtowildcard(x):
-
-	cidr=str(x)
-	cidr=str(IPv4Address(int(IPv4Address._make_netmask(cidr)[0])^(2**32-1)))
+def wildcard_to_cidr(wildcard_input):
+	cidr=ipaddress.IPv4Address._prefix_from_ip_int(int(ipaddress.IPv4Address(wildcard_input))^(2**32-1))
 	return cidr
 
-def cidrtowildcard():
-	if len(sys.argv)==2:
-		cidr=input("Enter a CIDR: ")
-		cidr=str(cidr)
-		print("Initial value (CIDR):",cidr)
-		print("")
-		print("Wildcard mask:",func_cidrtowildcard(cidr))
-		exit(0)
 
-	elif len(sys.argv)==3:
-		cidr=str(sys.argv[2])
-		print("Initial value (CIDR):",cidr)
-		print("")
-		print("Wildcard mask:",func_cidrtowildcard(cidr))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_wildcardtocidr(x):
-
-	wildcardmask=str(x)
-	cidr=IPv4Address._prefix_from_ip_int(int(IPv4Address(wildcardmask))^(2**32-1))
-	return cidr
-
-def wildcardtocidr():
-	if len(sys.argv)==2:
-		wildcardmask=input("Enter a wildcard mask: ")
-		wildcardmask=str(wildcardmask)
-		print("Initial value (wildcard mask):",wildcardmask)
-		print("")
-		print("CIDR:",func_wildcardtocidr(wildcardmask))
-		exit(0)
-
-	elif len(sys.argv)==3:
-		wildcardmask=str(sys.argv[2])
-		print("Initial value (wildcard mask):",wildcardmask)
-		print("")
-		print("CIDR:",func_wildcardtocidr(wildcardmask))
-		exit(0)
-
-	elif len(sys.argv)==4:
-		print("\033[0;31mOnly one argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_addrtobin(x):
-
-	addr=x
-
-	if "/" in addr:
-		(addr,cidr)=addr.split("/")
-		
-		ipaddr=[int(x) for x in addr.split(".")]
+def address_to_binary(ip_address):
+	if '/' in ip_address:
+		(ip,cidr)=ip_address.split('/')
+        
+		ip=[int(ip_address) for ip_address in ip.split('.')]
 		cidr=int(cidr)
 		mask=[(((1<<32)-1)<<(32-cidr)>>i)&255 for i in reversed(range(0,32,8))]
 
-		ipaddr=str(ipaddr[0])+"."+str(ipaddr[1])+"."+str(ipaddr[2])+"."+str(ipaddr[3])
-		mask=str(mask[0])+"."+str(mask[1])+"."+str(mask[2])+"."+str(mask[3])
+		ip=str(ip[0])+'.'+str(ip[1])+'.'+str(ip[2])+'.'+str(ip[3])
+		mask=str(mask[0])+'.'+str(mask[1])+'.'+str(mask[2])+'.'+str(mask[3])
 
-	elif " " in addr:
-		(addr, mask)=addr.split(" ")
+		binary_ip_address=ip_to_binary(ip)
+		binary_mask=mask_to_binary(mask)
+		return mask,binary_ip_address[0],binary_ip_address[1],binary_mask[0],binary_mask[1]
 
-		ipaddr=[int(x) for x in addr.split(".")]
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
+	elif " " in ip_address:
+		(ip,mask)=ip_address.split(" ")
+		cidr=mask_to_cidr(mask)
+		ip_address=ip_to_binary(ip)
+		mask_address=mask_to_binary(mask)
+		return cidr,ip_address[0],ip_address[1],mask_address[0],mask_address[1]
 
-		ipaddr=str(ipaddr[0])+"."+str(ipaddr[1])+"."+str(ipaddr[2])+"."+str(ipaddr[3])
-		mask=str(mask[0])+"."+str(mask[1])+"."+str(mask[2])+"."+str(mask[3])
 
-	return func_ipaddrtobinary(ipaddr),func_ipaddrtobinary(mask),func_ipaddrtobinaryfull(ipaddr),func_ipaddrtobinaryfull(mask),cidr,mask
+def binary_to_address(binary_address):
+		binary_ip_address=binary_address[0]
+		binary_mask=binary_address[1]
+		ip_address=binary_to_ip(binary_ip_address)
+		mask=binary_to_mask(binary_mask)
+		cidr=mask_to_cidr(mask)
+		return ip_address,mask,cidr
 
-def addrtobinary():
-	if len(sys.argv)==2:
-		decimal_value=input("Enter an IP address and a subnet mask: ")
-		print("Initial value (decimal):",decimal_value)
-		if "/" in decimal_value:
-			print("Initial mask value (decimal):",func_addrtobin(decimal_value)[5])
-		elif " " in decimal_value:
-			print("Initial CIDR value (decimal):",func_addrtobin(decimal_value)[4])
 
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
-		exit(0)
+def subnet_calculator(value):
+	if '/' in value:
+		ip_address=ipaddress.ip_network(value,strict=False)
 
-	elif len(sys.argv)==3:
-		decimal_value=(sys.argv[2])
-		print("Initial value (decimal):",decimal_value)
-		print("Initial mask value (decimal):",func_addrtobin(decimal_value)[5])
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
-		exit(0)
+		mask=ip_address.netmask
+		hosts=ip_address.num_addresses-2
+		first_host=ip_address[1]
+		last_host=ip_address[hosts]
+		broadcast=ip_address.broadcast_address
+		is_private=ip_address.is_private
+		is_global=ip_address.is_global
+		
+		subnets=[]
+		for subnet in ip_address.subnets(prefixlen_diff=0):
+			subnets.append(subnet)
+		count_subnet=len(subnets)
 
-	elif len(sys.argv)==4:
-		decimal_value=(sys.argv[2])+" "+(sys.argv[3])
-		print("Initial value (decimal):",decimal_value)
-		print("Initial CIDR value (decimal):",func_addrtobin(decimal_value)[4])
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[0])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[1])
-		print("")
-		print("Binary IP number value:",func_addrtobin(decimal_value)[2])
-		print("Binary mask number value:",func_addrtobin(decimal_value)[3])
-		exit(0)
+		return ip_address,mask,hosts,first_host,last_host,broadcast,is_private,is_global
+	elif ' ' in value:
+		(ip,mask)=value.split(" ")
+		cidr=mask_to_cidr(mask)
+		ip_address=str(ip)+'/'+str(cidr)
+		ip_address=ipaddress.ip_network(ip_address,strict=False)
 
-	elif len(sys.argv)==5:
-		print("\033[0;31mOnly one or two argument is expected.\033[00m")
-		exit(1)
+		mask=ip_address.netmask
+		hosts=ip_address.num_addresses-2
+		first_host=ip_address[1]
+		last_host=ip_address[hosts]
+		broadcast=ip_address.broadcast_address
+		is_private=ip_address.is_private
+		is_global=ip_address.is_global
+		
+		subnets=[]
+		for subnet in ip_address.subnets(prefixlen_diff=0):
+			subnets.append(subnet)
+		count_subnet=len(subnets)
 
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
+		return ip_address,cidr,hosts,first_host,last_host,broadcast,is_private,is_global
 
-def func_binarytoaddr(x):
 
-		addr=x
-		(addr, mask)=addr.split(" ")
+def advanced_subnet_calculator(ip_address):
+	if '/' in ip_address[0]:
+		original_ip_address=ip_address[0]
+		(ip,cidr)=ip_address[0].split('/')
+		new_netmask=ip_address[1]
+		netmask=cidr_to_mask(cidr)
+		new_netmask_b=cidr_to_mask(new_netmask)
 
-		addr=func_binarytoipaddr(addr)
-		mask=func_binarytoipaddr(mask)
-		return addr,mask
+		ip_address=ipaddress.ip_network(original_ip_address,strict=False)
 
-def binarytoaddr():
-	if len(sys.argv)==2:
-		binary_value=input("Enter an IP address and a subnet mask in binary format: ")
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal IP number value:",func_binarytoaddr(binary_value)[0])
-		print("Decimal mask number value:",func_binarytoaddr(binary_value)[1])
-		cidr=func_binarytoaddr(binary_value)[1]
-		print("CIDR:",func_masktocidr(cidr))
-		exit(0)
+		hosts=ip_address.num_addresses-2
+		first_host=ip_address[1]
+		last_host=ip_address[hosts]
+		broadcast=ip_address.broadcast_address
+		is_private=ip_address.is_private
+		is_global=ip_address.is_global
+		
+		subnets=[]
+		for subnet in ip_address.subnets(new_prefix=int(new_netmask)):
+			subnets.append(subnet)
+		count_subnet=len(subnets)
 
-	elif len(sys.argv)==3:
-		decimal_value=(sys.argv[2])
-		print("\033[0;31mTwo argument is expected.\033[00m")
-		exit(1)
+		return netmask,new_netmask_b,hosts,first_host,last_host,broadcast,is_private,is_global,count_subnet,subnets
 
-	elif len(sys.argv)==4:
-		binary_value=(sys.argv[2])+" "+(sys.argv[3])
-		print("Initial value (binary):",binary_value)
-		print("")
-		print("Decimal IP number value:",func_binarytoaddr(binary_value)[0])
-		print("Decimal mask number value:",func_binarytoaddr(binary_value)[1])
-		cidr=func_binarytoaddr(binary_value)[1]
-		print("CIDR:",func_masktocidr(cidr))
-		exit(0)
 
-	elif len(sys.argv)==5:
-		print("\033[0;31mOnly two argument is expected.\033[00m")
-		exit(1)
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+if __name__=='__main__':
 
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
+	if len(sys.argv)<2:
+		print(str(sys.argv[0]),"expected one argument.\nFor more information, enter the --help argument.")
 
-def func_subnetcalculator(x):
-	
-	if " " in x:
-		(addr, mask)=x.split(" ")
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
-		ipaddr=str(addr)+"/"+str(cidr)
-		ipaddr=ipaddress.ip_network(ipaddr, strict=False)
+	if args.dectobin!=None:
+		print("Original value:",args.dectobin)
+		print("\nBinary:",decimal_to_binary(args.dectobin)[0])
+		print("Signed Binary:",decimal_to_binary(args.dectobin)[1])
 
-	elif "/" in x:
-		ipaddr=ipaddress.ip_network(x, strict=False)
+	if args.bintodec!=None:
+		print("Original value:",args.bintodec)
+		print("\nDecimal:",binary_to_decimal(args.bintodec))
 
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
+	if args.dectohex!=None:
+		print("Original value:",args.dectohex)
+		print("\nHexadecimal:",decimal_to_hexadecimal(args.dectohex))
 
-	mask=ipaddr.netmask
-	size=ipaddr.num_addresses-2
-	firstHost=ipaddr[1]
-	lastHost=ipaddr[size]
-	br=ipaddr.broadcast_address
-	is_private=ipaddr.is_private
-	is_global=ipaddr.is_global
+	if args.hextodec!=None:
+		print("Original value:",args.hextodec)
+		print("\nDecimal:",hexadecimal_to_decimal(args.hextodec))
 
-	subnets=[]
-	for subnet in ipaddr.subnets(prefixlen_diff=0):
-		subnets.append(subnet)
+	if args.bintohex!=None:
+		print("Original value:",args.bintohex)
+		print("\nHexadecimal:",binary_to_hexadecimal(args.bintohex))
 
-	sn=len(subnets)
+	if args.hextobin!=None:
+		print("Original value:",args.hextobin)
+		print("\nBinary:",hexadecimal_to_binary(args.hextobin)[0])
+		print("Signed Binary:",hexadecimal_to_binary(args.hextobin)[1])
 
-	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
+	if args.iptobin!=None:
+		print("Original value:",args.iptobin)
+		print("\nBinary:",ip_to_binary(args.iptobin)[0])
+		print("Signed Binary:",ip_to_binary(args.iptobin)[1])
 
-def subnetcalculator():
-	if len(sys.argv)==2:
-		ipaddr=input("Enter an IP address and a CIDR or a subnet mask: ")
-		print("Initial value:",ipaddr)
+	if args.bintoip!=None:
+		print("Original value:",args.bintoip)
+		print("\nDecimal:",binary_to_ip(args.bintoip))
 
-		mask=str(func_subnetcalculator(ipaddr)[1])
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
+	if args.masktobin!=None:
+		print("Original value:",args.masktobin)
+		print("\nBinary:",mask_to_binary(args.masktobin)[0])
+		print("Signed Binary:",mask_to_binary(args.masktobin)[1])
 
-		if "/" in ipaddr:
-			print("Mask:",func_subnetcalculator(ipaddr)[1])
-		elif " " in ipaddr:
-			print("CIDR:", cidr)
+	if args.bintomask!=None:
+		print("Original value:",args.bintomask)
+		print("\nDecimal:",binary_to_mask(args.bintomask))
+
+	if args.masktocidr!=None:
+		print("Original value:",args.masktocidr)
+		print("\nCIDR:",mask_to_cidr(args.masktocidr))
+
+	if args.cidrtomask!=None:
+		print("Original value:",args.cidrtomask)
+		print("\nMask:",cidr_to_mask(args.cidrtomask))
+
+	if args.masktowildcard!=None:
+		print("Original value:",args.masktowildcard)
+		print("\nWildcard mask:",mask_to_wildcard(args.masktowildcard))
+
+	if args.wildcardtomask!=None:
+		print("Original value:",args.wildcardtomask)
+		print("\nMask:",wildcard_to_mask(args.wildcardtomask))
+
+	if args.wildcardtocidr!=None:
+		print("Original value:",args.wildcardtocidr)
+		print("\nCIDR:",wildcard_to_cidr(args.wildcardtocidr))
+
+	if args.addrtobin!=None:
+		if len(args.addrtobin)==1:
+			print("Original value:",args.addrtobin[0])
+			print("Mask:",address_to_binary(args.addrtobin[0])[0])
+			print("\nSigned IP Binary:",address_to_binary(args.addrtobin[0])[1])
+			print("IP Binary:",address_to_binary(args.addrtobin[0])[2])
+			print("\nSigned Mask Binary:",address_to_binary(args.addrtobin[0])[3])
+			print("Mask Binary:",address_to_binary(args.addrtobin[0])[4])
+		elif len(args.addrtobin)==2:
+			ip_address=str(args.addrtobin[0])+str(" ")+str(args.addrtobin[1])
+			print("Original value:",ip_address)
+			print("CIDR:",address_to_binary(ip_address)[0])
+			print("\nSigned IP Binary:",address_to_binary(ip_address)[1])
+			print("IP Binary:",address_to_binary(ip_address)[2])
+			print("\nSigned Mask Binary:",address_to_binary(ip_address)[3])
+			print("Mask Binary:",address_to_binary(ip_address)[4])
 		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
+			print(color.BOLD+color.RED+"A maximum of two arguments are expected."+color.DEFAULT)
 
-		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
-			addrtype="Private"
-		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
-			addrtype="Public"
+	if args.bintoaddr!=None:
+		binary_address=str(args.bintoaddr[0])+str(" ")+str(args.bintoaddr[1])
+		print("Original value:",binary_address)
+		print("\nIP address:",binary_to_address(args.bintoaddr)[0])
+		print("Mask:",binary_to_address(args.bintoaddr)[1])
+		print("CIDR:",binary_to_address(args.bintoaddr)[2])
+
+	if args.subnetcalc!=None:
+		if len(args.subnetcalc)==1:
+			print("Original value:",args.subnetcalc[0])
+			print("Mask:",subnet_calculator(args.subnetcalc[0])[1])
+			print("\nHosts:",subnet_calculator(args.subnetcalc[0])[2])
+			print("First host:",subnet_calculator(args.subnetcalc[0])[3])
+			print("Last host:",subnet_calculator(args.subnetcalc[0])[4])
+			print("Broadcast:",subnet_calculator(args.subnetcalc[0])[5])
+			
+			private_address=subnet_calculator(args.subnetcalc[0])[6]
+			public_address=subnet_calculator(args.subnetcalc[0])[7]
+			if public_address==True and private_address==False:
+				address_type="public address"
+			elif private_address==True and public_address==False:
+				address_type="private address"
+			else:
+				print(color.BOLD+color.RED+"the type of address is not identifiable."+color.DEFAULT)
+
+			print("\nType of address:",address_type)
+		elif len(args.subnetcalc)==2:
+			user_value=str(args.subnetcalc[0])+str(" ")+str(args.subnetcalc[1])
+			print("Original value:",user_value)
+			print("CIDR:",subnet_calculator(user_value)[1])
+			print("\nHosts:",subnet_calculator(user_value)[2])
+			print("First host:",subnet_calculator(user_value)[3])
+			print("Last host:",subnet_calculator(user_value)[4])
+			print("Broadcast:",subnet_calculator(user_value)[5])
+			
+			private_address=subnet_calculator(user_value)[6]
+			public_address=subnet_calculator(user_value)[7]
+
+			if public_address==True and private_address==False:
+				address_type="public address"
+			elif private_address==True and public_address==False:
+				address_type="private address"
+			else:
+				print(color.BOLD+color.RED+"the type of address is not identifiable."+color.DEFAULT)
+
+			print("\nType of address:",address_type)
+
+	if args.advancedsubnetcalc!=None:
+		original_value=args.advancedsubnetcalc[0]+' '+args.advancedsubnetcalc[1]
+		print("Original value:",original_value)
+
+		private_address=advanced_subnet_calculator(args.advancedsubnetcalc)[6]
+		public_address=advanced_subnet_calculator(args.advancedsubnetcalc)[7]
+
+		if public_address==True and private_address==False:
+			address_type="public address"
+		elif private_address==True and public_address==False:
+			address_type="private address"
 		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
+			print(color.BOLD+color.RED+"the type of address is not identifiable."+color.DEFAULT)
 
-		print("")
-		print("Network address:",func_subnetcalculator(ipaddr)[0])
-		print("")
-		print("First host:",func_subnetcalculator(ipaddr)[3])
-		print("Last host:",func_subnetcalculator(ipaddr)[4])
-		print("")
-		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
-		print("")
-		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
-		print("")
-		print("Type of address:",addrtype)
-		exit(0)
+		print("Type of address:",address_type)
 
-	elif len(sys.argv)==3:
-		ipaddr=(sys.argv[2])
-		print("Initial value:",ipaddr)
-		print("Mask:",func_subnetcalculator(ipaddr)[1])
+		print("Original mask:",advanced_subnet_calculator(args.advancedsubnetcalc)[0])
+		print("New mask:",advanced_subnet_calculator(args.advancedsubnetcalc)[1])
 
-		mask=str(func_subnetcalculator(ipaddr)[1])
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
+		print("\nHosts:",advanced_subnet_calculator(args.advancedsubnetcalc)[2])
+		print("First host:",advanced_subnet_calculator(args.advancedsubnetcalc)[3])
+		print("Last host:",advanced_subnet_calculator(args.advancedsubnetcalc)[4])
+		print("Broadcast:",advanced_subnet_calculator(args.advancedsubnetcalc)[5])
 
-		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
-			addrtype="Private"
-		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
-			addrtype="Public"
+		subnets=advanced_subnet_calculator(args.advancedsubnetcalc)[8]
+
+		if subnets==1:
+			print("\nSubnet:",advanced_subnet_calculator(args.advancedsubnetcalc)[8])
+		elif subnets>=2:
+			print("\nSubnets:",advanced_subnet_calculator(args.advancedsubnetcalc)[8])
 		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
+			print(color.BOLD+color.RED+"the number of subnets could not be identified."+color.DEFAULT)
+		
+		subnet_list=advanced_subnet_calculator(args.advancedsubnetcalc)[9]
+		subnets_list=len(subnet_list)
 
-		print("")
-		print("Network address:",func_subnetcalculator(ipaddr)[0])
-		print("")
-		print("First host:",func_subnetcalculator(ipaddr)[3])
-		print("Last host:",func_subnetcalculator(ipaddr)[4])
-		print("")
-		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
-		print("")
-		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
-		print("")
-		print("Type of address:",addrtype)
-		exit(0)
-
-	elif len(sys.argv)==4:
-		ipaddr=(sys.argv[2])+" "+(sys.argv[3])
-		print("Initial value:",ipaddr)
-
-		mask=str(func_subnetcalculator(ipaddr)[1])
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
-
-		if (func_subnetcalculator(ipaddr)[8]==True) and (func_subnetcalculator(ipaddr)[9]==False):
-			addrtype="Private"
-		elif (func_subnetcalculator(ipaddr)[8]==False) and (func_subnetcalculator(ipaddr)[9]==True):
-			addrtype="Public"
+		if subnets_list==1:
+			print("Subnet list:",*subnet_list)
+		elif subnets_list>=2:
+			print("Subnets list:",*subnet_list)
 		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
-
-		print("CIDR:", cidr)
-
-		print("")
-		print("Network address:",func_subnetcalculator(ipaddr)[0])
-		print("")
-		print("First host:",func_subnetcalculator(ipaddr)[3])
-		print("Last host:",func_subnetcalculator(ipaddr)[4])
-		print("")
-		print("Broadcast:",func_subnetcalculator(ipaddr)[5])
-		print("")
-		print("Number of hosts:",func_subnetcalculator(ipaddr)[2])
-		print("")
-		print("Type of address:",addrtype)
-		exit(0)
-
-	elif len(sys.argv)==5:
-		print("\033[0;31mOnly two argument is expected.\033[00m")
-		exit(1)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-def func_advancedsubnetcalculator(x,y):
-	
-	if " " in x:
-		(addr, mask)=x.split(" ")
-		mask=[int(x) for x in mask.split(".")]
-		cidr=sum((bin(x).count('1') for x in mask))
-		ipaddr=str(addr)+"/"+str(cidr)
-		ipaddr=ipaddress.ip_network(ipaddr, strict=False)
-
-	elif "/" in x:
-		ipaddr=ipaddress.ip_network(x, strict=False)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-	mask=ipaddr.netmask
-	size=ipaddr.num_addresses-2
-	firstHost=ipaddr[1]
-	lastHost=ipaddr[size]
-	br=ipaddr.broadcast_address
-	is_private=ipaddr.is_private
-	is_global=ipaddr.is_global
-
-	subnets=[]
-	for subnet in ipaddr.subnets(new_prefix=int(y)):
-		subnets.append(subnet)
-
-	sn=len(subnets)
-
-	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
-
-def advancedsubnetcalculator():
-	if len(sys.argv)==2:
-		ipaddr=input("Enter an IP address, a CIDR and the new CIDR: ")
-
-		(addr,cidr)=ipaddr.split("/")
-		(addr,newcidr)=ipaddr.split(" ")
-
-		if (func_subnetcalculator(addr)[8]==True) and (func_subnetcalculator(addr)[9]==False):
-			addrtype="Private"
-		elif (func_subnetcalculator(addr)[8]==False) and (func_subnetcalculator(addr)[9]==True):
-			addrtype="Public"
-		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
-
-		print("Initial value:",str(addr))
-		print("")
-		print("Original network address:",func_advancedsubnetcalculator(addr,newcidr)[0])
-		print("New CIDR:",newcidr)
-		print("")
-		print("First host:",func_advancedsubnetcalculator(addr,newcidr)[3])
-		print("Last host:",func_advancedsubnetcalculator(addr,newcidr)[4])
-		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
-		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
-		print("")
-		print("Type of address:",addrtype)
-		print("")
-		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
-
-		(a,b)=addr.split("/")
-		c=a+"/"+newcidr
-		print("Number of hosts per subnet:",func_subnetcalculator(str(c))[2])
-
-		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
-		print("List of subnets:",*sn)
-
-		exit(0)
-
-	elif len(sys.argv)==3:
-		print("\033[0;31mTwo arguments are expected.\033[00m")
-		exit(1)
-
-	elif len(sys.argv)==4:
-		ipaddr=(sys.argv[2])+" "+(sys.argv[3])
-
-		(addr,cidr)=ipaddr.split("/")
-		(addr,newcidr)=ipaddr.split(" ")
-
-		if (func_subnetcalculator(addr)[8]==True) and (func_subnetcalculator(addr)[9]==False):
-			addrtype="Private"
-		elif (func_subnetcalculator(addr)[8]==False) and (func_subnetcalculator(addr)[9]==True):
-			addrtype="Public"
-		else:
-			print("\033[0;31mAn unexpected error was caused.\033[00m")
-			exit(1)
-
-		print("Initial value:",str(addr))
-		print("")
-		print("Original network address:",func_advancedsubnetcalculator(addr,newcidr)[0])
-		print("New CIDR:",newcidr)
-		print("")
-		print("First host:",func_advancedsubnetcalculator(addr,newcidr)[3])
-		print("Last host:",func_advancedsubnetcalculator(addr,newcidr)[4])
-		print("Broadcast:",func_advancedsubnetcalculator(addr,newcidr)[5])
-		print("Number of hosts:",func_advancedsubnetcalculator(addr,newcidr)[2])
-		print("")
-		print("Type of address:",addrtype)
-		print("")
-		print("Number of subnets:",func_advancedsubnetcalculator(addr,newcidr)[6])
-		sn=func_advancedsubnetcalculator(addr,newcidr)[7]
-
-		(a,b)=addr.split("/")
-		c=a+"/"+newcidr
-		print("Number of hosts per subnet:",func_subnetcalculator(str(c))[2])
-
-		print("List of subnets:",*sn)
-		exit(0)
-
-	else:
-		print("\033[0;31mAn unexpected error was caused.\033[00m")
-		exit(1)
-
-#def func_vlsmcalculator(x):
-#
-#	if "/" in x:
-#
-#		ipaddrCidrAndVLSM=x.split(" ")
-#		
-#		(ip,cidr)=ipaddrCidrAndVLSM[0].split("/")
-#		
-#		VLSMValues=ipaddrCidrAndVLSM[1:]
-#		SubnetNumbers=VLSMValues[0]
-#		HostsValues=VLSMValues[1:]
-#
-#		#print(ipaddrCidrAndVLSM)
-#		#print(SubnetNumbers)
-#		#print(VLSMValues)
-#		#print(HostsValues)
-#
-#		ipaddr=ipaddress.ip_network(ipaddrCidrAndVLSM[0], strict=False)
-#
-#		if (int(SubnetNumbers)!=len(HostsValues)):
-#			print("\033[0;31mThe number of subnets entered does not match the number of hosts.\033[00m")
-#			exit(1)
-#
-#	else:
-#		print("\033[0;31mAn unexpected error was caused.\033[00m")
-#		exit(1)
-#
-#	mask=ipaddr.netmask
-#	size=ipaddr.num_addresses-2
-#	firstHost=ipaddr[1]
-#	lastHost=ipaddr[size]
-#	br=ipaddr.broadcast_address
-#	is_private=ipaddr.is_private
-#	is_global=ipaddr.is_global
-#
-#	subnets=[]
-#	for subnet in ipaddr.subnets(prefixlen_diff=0):
-#		subnets.append(subnet)
-#
-#	sn=len(subnets)
-#
-#	return ipaddr,mask,size,firstHost,lastHost,br,sn,subnets,is_private,is_global
-#
-#print(func_vlsmcalculator("192.168.0.1/24 4 100 50 20 10"))
-
-if __name__ == '__main__':
-	Check_UserInput()
+			print(color.BOLD+color.RED+"the list of subnets could not be identified."+color.DEFAULT)
