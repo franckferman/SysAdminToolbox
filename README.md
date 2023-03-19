@@ -1,36 +1,33 @@
 <div id="top"></div>
 
-<div id="top" align="center">
+<div align="center">
 
 [![Contributors][contributors-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/graphs/contributors)
 [![Forks][forks-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/network/members)
 [![Stargazers][stars-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/stargazers)
 [![Issues][issues-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/issues)
 [![MIT License][license-shield]](https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/LICENSE)
-[![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/franckferman)
 
-</div>
-
-<br />
-<div align="center">
+<br/>
   <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
-    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/img/logo.png" alt="Logo" width="200" height="200">
+    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/graphical_resources/banner-The_Network_Calculator_Toolbox.jpg" alt="banner-The_Network_Calculator_Toolbox">
   </a>
-
-<h3 align="center">The Network Calculator Toolbox</h3>
+  
+<h3 align="center">The_Network_Calculator_Toolbox</h3>
 
   <p align="center">
-    The Network Calculator Toolbox is a Python3 tool allowing the realization of numerous calculations dedicated essentially to the network administration.
-    <br />
-    <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/main/README.md"><strong>Explore the full documentation »</strong></a>
-    <br />
-    <br />
-    <a href="https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw">View Demo</a>
-    .
+  Versatile tool designed for network administration, providing a wide range of useful calculations.
+    <br/><br/>
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/issues">Report Bug</a>
     ·
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/issues">Request Feature</a>
   </p>
+  
+<br/>
+  <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
+    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/graphical_resources/demo-The_Network_Calculator_Toolbox.png" alt="demo-The_Network_Calculator_Toolbox" width="1044" height="592">
+  </a>
+<br/><br/>
 </div>
 
 <details>
