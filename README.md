@@ -34,10 +34,7 @@
   <summary>Table of Contents</summary>
   <ol>
     <li>
-      <a href="#about-the-project">About The Project</a>
-      <ul>
-        <li><a href="#tested-on">Tested on</a></li>
-      </ul>
+      <a href="#about">About</a>
     </li>
     <li>
       <a href="#getting-started">Getting Started</a>
@@ -52,143 +49,79 @@
   </ol>
 </details>
 
-<!-- ABOUT THE PROJECT -->
-## About The Project
+## About
 
-[![asciicast](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw.svg)](https://asciinema.org/a/Rjq1ZgtQ78G02PNWNwdGWsMuw)
+The Network Calculator Toolbox is a project born out of a desire for a simple, efficient tool to perform the common tasks of a network administrator.
 
-I wanted to make a simple and quick tool to use to perform classic tasks that a network administrator for example would have to perform.
+The ultimate goal of the Network Calculator Toolbox is to save time and streamline the network administration process. By consolidating multiple tools into a single, locally-hosted application, users can quickly and easily perform a wide range of network calculations without the need for external resources or dependencies.
 
-I also did this project to consolidate some of my Python knowledge. Learning is much easier with practical cases.
+Whether you are an experienced network administrator or just getting started in the field, the Network Calculator Toolbox offers a convenient and powerful solution for all your network calculation needs.
 
-At the end, the ultimate goal is to achieve time savings and ease of use.
+<br/>Here is the list of features:
 
-Also, I prefer to have my tool (regrouping multiple tools) locally, allowing me to do these tasks, rather than being dependent on multiple tools, being in addition on Internet sites.
-
-The Network Calculator Toolbox is a tool allowing the realization of numerous calculations dedicated essentially to the network administration.
-
-<br />Here is an overview of the available features:
-
-- Simple subnet calculator.
-- Advanced subnet calculator.
-- Convert an IP address and a CIDR (or a mask) to a binary number.
-- Convert a binary IP address and a mask to a decimal value.
-- Convert an IP address to a binary number.
-- Convert an IP address in binary format to decimal format.
-- Convert a mask to a binary number.
-- Convert a mask in binary format to decimal format.
-- Convert a mask to a CIDR.
-- Convert a CIDR to a mask.
-- Convert a mask to a wildcard mask.
-- Convert a wildcard mask to a mask.
-- Convert a decimal number into a binary number.
-- Convert a binary number into a decimal number.
-- Convert a decimal number into a hexadecimal number.
-- Convert a hexadecimal number into a decimal number.
-
-Many other features are under development:
-
-- VLSM Calculator.
-- VLAN Helper.
-- ACL Helper.
+* - [x] [Simple subnet calculator]
+* - [x] [Advanced subnet calculator]
+* - [x] [Convert an IP address and a CIDR (or a mask) to a binary number]
+* - [x] [Convert a binary IP address and a mask to a decimal value]
+* - [x] [Convert an IP address to a binary number]
+* - [x] [Convert an IP address in binary format to decimal format]
+* - [x] [Convert a mask to a binary number]
+* - [x] [Convert a mask in binary format to decimal format]
+* - [x] [Convert a mask to a CIDR]
+* - [x] [Convert a CIDR to a mask]
+* - [x] [Convert a mask to a wildcard mask]
+* - [x] [Convert a wildcard mask to a mask]
+* - [x] [Convert a decimal number into a binary number]
+* - [x] [Convert a binary number into a decimal number]
+* - [x] [Convert a decimal number into a hexadecimal number]
+* - [x] [Convert a hexadecimal number into a decimal number]
+* - [x] [VLSM Calculator]
+* - [x] [VLAN Helper]
+* - [x] [ACL Helper]
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-### Tested On
-
-This program has been tested on different operating systems:
-* - [x] [Microsoft Windows 11 Pro](https://www.microsoft.com/en-us/windows/get-windows-11), [Python 3](https://www.python.org/)
-* - [x] [Microsoft Windows 10 Pro](https://www.microsoft.com/en-us/d/windows-10-pro/df77x4d43rkt), [Python 3](https://www.python.org/)
-* - [x] [Debian 11](https://www.debian.org/), [Python 3](https://www.python.org/)
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
-<!-- GETTING STARTED -->
 ## Getting Started
 
-This course is not intended to teach you how to use your Windows or Linux terminal or also Python. However, I will simply show you (for beginners) how to easily download my script and run it.
-
-I don't think a tutorial would be very useful to teach you how to use the script as it was designed to be naturally intuitive, you should be able to find your way around quite easily.
+This course provides guidance on downloading and running my script. It is not intended to teach Windows or Linux terminal or Python. The script is designed to be intuitive, so a tutorial on how to use it is not necessary.
 
 ### Prerequisites
 
-Please note that my script must be placed where you want your machines to be stored.
-
-* For example, on Windows, if you want them to be in your C:\ directory, issue the following command from your PowerShell terminal:
-```sh
-Start-BitsTransfer -Source https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/main.py -Destination "C:\" -DisplayName "The_Network_Calculator_Toolbox - Downloading function - Franck FERMAN." -Description "Downloading the script."
-```
-
-Of course, you can change the desired destination path. To do this, you just have to change the argument of the -Destination parameter.
-
-* For example:
-```sh
-Start-BitsTransfer -Source https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/main.py -Destination "D:\" -DisplayName "The_Network_Calculator_Toolbox - Downloading function - Franck FERMAN." -Description "Downloading the script."
-```
-
-* For example, on Linux, if you want them to be in your home folder, issue the following command from your terminal:
-```sh
-curl https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/main.py -o ~/main.py
-```
-
-Of course, you can change the desired destination path. To do this, you just have to change the argument of the -o parameter.
-
-* For example:
-```sh
-mkdir ./The_Network_Calculator_Toolbox&&curl https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/main.py -o ./The_Network_Calculator_Toolbox/main.py
-```
+This description is currently being drafted.
 
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-* On Windows, to run the program, simply go to the program installation path and run the program:
-```sh
-Set-Location -Path "C:\";python3.exe .\main.py
-```
-
-* On Linux, to run the program, simply go to the program installation path and run the program:
-```sh
-cd ~&&python3 ./main.py
-```
+This description is currently being drafted.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-<!-- CONTRIBUTING -->
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+Contributions are the backbone of the open source community, making it an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
+If you have a suggestion to improve this project, we encourage you to contribute by forking the repository and creating a pull request with your proposed changes. Alternatively, you can also open an issue with the tag "enhancement" to discuss your idea.
+
+If you find this project useful or appreciate the work that has been done, we would be grateful if you could give it a star. This will help raise the project's profile and attract more contributors in the future.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-<!-- LICENSE -->
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-<!-- CONTACT -->
 ## Contact
 
-Project Link: [https://github.com/franckferman/The_Network_Calculator_Toolbox](https://github.com/franckferman/The_Network_Calculator_Toolbox)
+[![ProtonMail][protonmail-shield]](mailto:fferman@protonmail.ch)  [![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/franckferman)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-<!-- MARKDOWN LINKS & IMAGES -->
-<!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
 [contributors-shield]: https://img.shields.io/github/contributors/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
-[contributors-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/graphs/contributors
 [forks-shield]: https://img.shields.io/github/forks/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
-[forks-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/network/members
 [stars-shield]: https://img.shields.io/github/stars/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
-[stars-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/stargazers
 [issues-shield]: https://img.shields.io/github/issues/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
-[issues-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/issues
 [license-shield]: https://img.shields.io/github/license/franckferman/The_Network_Calculator_Toolbox.svg?style=for-the-badge
-[license-url]: https://github.com/franckferman/The_Network_Calculator_Toolbox/blob/master/LICENSE.txt
-[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
-[linkedin-url]: https://linkedin.com/in/franckferman
-[product-screenshot]: images/screenshot.png
+[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=blue
+[protonmail-shield]: https://img.shields.io/badge/ProtonMail-8B89CC?style=for-the-badge&logo=protonmail&logoColor=white
