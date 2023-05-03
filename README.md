@@ -10,10 +10,10 @@
 
 <br/>
   <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
-    <img src="https://raw.githubusercontent.com/franckferman/The Network Calculator Toolbox/main/graphical_resources/banner-The_Network_Calculator_Toolbox.jpg.png" alt="banner-The_Network_Calculator_Toolbox">
+    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/graphical_resources/banner-The_Network_Calculator_Toolbox.jpg.png" alt="banner-The_Network_Calculator_Toolbox">
   </a>
   
-<h3 align="center">The_Network_Calculator_Toolbox</h3>
+<h3 align="center">The Network Calculator Toolbox</h3>
 
   <p align="center">
   Versatile tool designed for network administration, providing a wide range of useful calculations.
