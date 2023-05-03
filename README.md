@@ -22,12 +22,7 @@
     ·
     <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox/issues">Request Feature</a>
   </p>
-  
-<br/>
-  <a href="https://github.com/franckferman/The_Network_Calculator_Toolbox">
-    <img src="https://raw.githubusercontent.com/franckferman/The_Network_Calculator_Toolbox/main/graphical_resources/demo-The_Network_Calculator_Toolbox.png" alt="demo-The_Network_Calculator_Toolbox" width="1044" height="592">
-  </a>
-<br/><br/>
+
 </div>
 
 <details>
