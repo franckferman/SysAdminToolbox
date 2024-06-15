@@ -309,3 +309,6 @@ def advanced_subnet_calculator(ip_address):
 		count_subnet=len(subnets)
 
 		return netmask,new_netmask_b,hosts,first_host,last_host,broadcast,is_private,is_global,count_subnet,subnets
+	
+print (" it has been a pleasure working on this app")
+	 
