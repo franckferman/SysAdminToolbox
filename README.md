@@ -102,33 +102,10 @@ Before diving into the installation process, ensure you meet the following prere
 
 ### Installation methods
 
-1. **Git clone the repository**:
+**Git clone the repository**:
 ```bash
 git clone https://github.com/franckferman/SysAdminToolbox.git
 ```
-
-2. **Direct download**:
-To skip cloning and directly download the script (designed for simplicity and flexibility, it doesn't depend on any external packages, so if you only need the script, you can also directly download it):
-```bash
-curl -O https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/src/SysAdminToolbox/SysAdminToolbox.py
-```
-
-3. **Pip Installation**:
-
-- Create & Activate a Virtual Environment:
-```bash
-python3 -m venv SysAdminToolboxEnv
-source SysAdminToolboxEnv/bin/activate
-```
-
-- Install SysAdminToolbox:
-```bash
-pip install SysAdminToolbox
-```
-
-4. **Docker integration**:
-
-For a Docker-based setup, refer to our Docker-specific guide: [SysAdminToolbox Docker Setup](https://github.com/franckferman/SysAdminToolbox/blob/stable/docker/README.md).
 
 <p align="right">(<a href="#top">🔼 Back to top</a>)</p>
 
@@ -252,7 +229,6 @@ This project is licensed under the GNU Affero General Public License, Version 3.
 [issues-url]: https://github.com/franckferman/SysAdminToolbox/issues
 [license-shield]: https://img.shields.io/github/license/franckferman/SysAdminToolbox.svg?style=for-the-badge
 [license-url]: https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE
-[unittest-shield]: https://img.shields.io/github/actions/workflow/status/franckferman/SysAdminToolbox/unittest.yml?style=for-the-badge
 [protonmail-shield]: https://img.shields.io/badge/ProtonMail-8B89CC?style=for-the-badge&logo=protonmail&logoColor=blueviolet
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=blue
 [twitter-shield]: https://img.shields.io/badge/-Twitter-black.svg?style=for-the-badge&logo=twitter&colorB=blue
