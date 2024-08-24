@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SysAdminToolbox"
+version = "1.0.0"
+description = "Versatile tool designed for network administration, providing a wide range of useful calculations."
+authors = [{ name = "Franck Ferman", email = "contact@franckferman.fr" }]
+license = { file = "LICENSE" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Networking",
+    "Topic :: Utilities"
+]
+readme = { file = "README.md", content-type = "text/markdown" }
+keywords = ["networking", "administration", "sysadmin", "tools", "utilities"]
+requires-python = ">=3.9"
+
+[project.urls]
+Homepage = "https://github.com/franckferman/SysAdminToolbox"
+
+[project.scripts]
+SysAdminToolbox = "SysAdminToolbox.SysAdminToolbox:main"
