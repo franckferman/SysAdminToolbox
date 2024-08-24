@@ -5,11 +5,11 @@
 [![Forks][forks-shield]](https://github.com/franckferman/SysAdminToolbox/network/members)
 [![Stargazers][stars-shield]](https://github.com/franckferman/SysAdminToolbox/stargazers)
 [![Issues][issues-shield]](https://github.com/franckferman/SysAdminToolbox/issues)
-[![License][license-shield]](https://github.com/franckferman/SysAdminToolbox/blob/main/LICENSE)
+[![License][license-shield]](https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE)
 
 <!-- Logo -->
 <a href="https://github.com/franckferman/SysAdminToolbox">
-  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/main/docs/github/graphical_resources/Logo-Without_background-SysAdminToolbox.png" alt="SysAdminToolbox Logo" width="auto" height="auto">
+  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/docs/github/graphical_resources/Logo-Without_background-SysAdminToolbox.png" alt="SysAdminToolbox Logo" width="auto" height="auto">
 </a>
 
 <!-- Title & Tagline -->
@@ -22,7 +22,7 @@
 
 <!-- Links & Demo -->
 <p align="center">
-    <a href="https://github.com/franckferman/SysAdminToolbox/blob/main/README.md" class="button-style"><strong>📘 Explore the full documentation</strong></a>
+    <a href="https://github.com/franckferman/SysAdminToolbox/blob/stable/README.md" class="button-style"><strong>📘 Explore the full documentation</strong></a>
     ·
     <a href="https://github.com/franckferman/SysAdminToolbox/issues">🐞 Report Bug</a>
     ·
@@ -78,14 +78,14 @@ Whether you are an experienced network administrator or just getting started in 
 * - [x] Calculate subnet details (`--subnetcalc`, `--subnet`, `--sc`)
 * - [x] Calculate advanced subnet details (`--advancedsubnetcalc`, `--asc`)
 * - [x] Calculate VLSM details for a network with required hosts (`--vlsmcalc`, `--vlsm`)
-* - [x] Perform a DNS lookup on a domain name (`--dnslookup`)
+* - [x] Perform a DNS lookup on a dostable name (`--dnslookup`)
 * - [x] Provide VLAN creation command help (`--vlanhelper`)
 * - [x] Provide ACL creation command help (`--aclhelper`)
 * - [x] Display VLAN cheat sheet (`--vlancheatsheet`)
 * - [x] Display ACL cheat sheet (`--aclcheatsheet`)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/main/docs/github/graphical_resources/Screenshot-SysAdminToolbox_Demo.png" alt="SysAdminToolbox Demo Screenshot" width="auto" height="auto">
+  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/docs/github/graphical_resources/Screenshot-SysAdminToolbox_Demo.png" alt="SysAdminToolbox Demo Screenshot" width="auto" height="auto">
 </p>
 
 <p align="right">(<a href="#top">🔼 Back to top</a>)</p>
@@ -110,7 +110,7 @@ git clone https://github.com/franckferman/SysAdminToolbox.git
 2. **Direct download**:
 To skip cloning and directly download the script (designed for simplicity and flexibility, it doesn't depend on any external packages, so if you only need the script, you can also directly download it):
 ```bash
-curl -O https://raw.githubusercontent.com/franckferman/SysAdminToolbox/main/src/SysAdminToolbox/SysAdminToolbox.py
+curl -O https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/src/SysAdminToolbox/SysAdminToolbox.py
 ```
 
 3. **Pip Installation**:
@@ -128,7 +128,7 @@ pip install SysAdminToolbox
 
 4. **Docker integration**:
 
-For a Docker-based setup, refer to our Docker-specific guide: [SysAdminToolbox Docker Setup](https://github.com/franckferman/SysAdminToolbox/blob/main/docker/README.md).
+For a Docker-based setup, refer to our Docker-specific guide: [SysAdminToolbox Docker Setup](https://github.com/franckferman/SysAdminToolbox/blob/stable/docker/README.md).
 
 <p align="right">(<a href="#top">🔼 Back to top</a>)</p>
 
@@ -185,7 +185,7 @@ python3 src/SysAdminToolbox/SysAdminToolbox.py -h
 #### 🔍 Networking tools:
 | Task | Command |
 | --- | --- |
-| Perform a DNS lookup on a domain name | `python3 src/SysAdminToolbox/SysAdminToolbox.py --dnslookup example.com` |
+| Perform a DNS lookup on a dostable name | `python3 src/SysAdminToolbox/SysAdminToolbox.py --dnslookup example.com` |
 
 #### 🕵️ Configuration Helpers:
 | Task | Command |
@@ -228,7 +228,7 @@ Your support is greatly appreciated. We're grateful for every star! Your backing
 
 ## 📚 License
 
-This project is licensed under the GNU Affero General Public License, Version 3.0. For more details, please refer to the LICENSE file in the repository: [Read the license on GitHub](https://github.com/franckferman/SysAdminToolbox/blob/main/LICENSE)
+This project is licensed under the GNU Affero General Public License, Version 3.0. For more details, please refer to the LICENSE file in the repository: [Read the license on GitHub](https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE)
 
 <p align="right">(<a href="#top">🔼 Back to top</a>)</p>
 
@@ -251,7 +251,7 @@ This project is licensed under the GNU Affero General Public License, Version 3.
 [issues-shield]: https://img.shields.io/github/issues/franckferman/SysAdminToolbox.svg?style=for-the-badge
 [issues-url]: https://github.com/franckferman/SysAdminToolbox/issues
 [license-shield]: https://img.shields.io/github/license/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[license-url]: https://github.com/franckferman/SysAdminToolbox/blob/main/LICENSE
+[license-url]: https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE
 [unittest-shield]: https://img.shields.io/github/actions/workflow/status/franckferman/SysAdminToolbox/unittest.yml?style=for-the-badge
 [protonmail-shield]: https://img.shields.io/badge/ProtonMail-8B89CC?style=for-the-badge&logo=protonmail&logoColor=blueviolet
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=blue
