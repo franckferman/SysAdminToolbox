@@ -1,65 +1,35 @@
-<div id="top" align="center">
-
-[![Contributors][contributors-shield]](https://github.com/franckferman/SysAdminToolbox/graphs/contributors)
-[![Forks][forks-shield]](https://github.com/franckferman/SysAdminToolbox/network/members)
-[![Stargazers][stars-shield]](https://github.com/franckferman/SysAdminToolbox/stargazers)
-[![Issues][issues-shield]](https://github.com/franckferman/SysAdminToolbox/issues)
-[![License][license-shield]](https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE)
+<div align="center">
 
 <a href="https://github.com/franckferman/SysAdminToolbox">
-  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/docs/github/graphical_resources/Logo-Without_background-SysAdminToolbox.png" alt="SysAdminToolbox Logo" width="auto" height="auto">
+  <img src="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/docs/github/graphical_resources/Logo-Without_background-SysAdminToolbox.png" alt="SysAdminToolbox logo" width="400">
 </a>
 
-<h3 align="center">SysAdminToolbox</h3>
-<p align="center">
-    <em>Network administration suite - calculations, diagnostics, and configuration helpers.</em>
-    <br>
-    Zero external dependencies. Python 3 stdlib only.
-</p>
+*Network administration suite - calculations, diagnostics, and configuration helpers.*
+
+Zero runtime Python dependencies. Standard library only.
+
+[![Tests](https://github.com/franckferman/SysAdminToolbox/actions/workflows/tests.yml/badge.svg?branch=stable)](https://github.com/franckferman/SysAdminToolbox/actions/workflows/tests.yml)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
-## Table of Contents
-
-<details open>
-  <summary><strong>Click to collapse/expand</strong></summary>
-  <ol>
-    <li><a href="#about">About</a></li>
-    <li><a href="#installation">Installation</a></li>
-    <li><a href="#usage">Usage</a></li>
-    <li><a href="#commands">Commands</a></li>
-    <li><a href="#troubleshooting">Troubleshooting</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-  </ol>
-</details>
-
 ## About
 
-SysAdminToolbox is a self-contained CLI tool for network administrators. It consolidates subnet calculations, base conversions, IPv6 utilities, network diagnostics, MAC address analysis, vendor configuration helpers, and cheatsheets into a single script with zero pip dependencies.
+SysAdminToolbox is a self-contained CLI for day-to-day network administration. It brings address and subnet calculations, IPv6 and MAC utilities, diagnostics, vendor configuration helpers, and concise cheatsheets into one installable Python package.
 
-### Features
-
-**Conversions** - Decimal, binary, hexadecimal, IP, mask, CIDR, wildcard conversions in all directions.
-
-**Subnet calculations** - Subnet calculator, advanced subnetting (IPv4 + IPv6), VLSM, supernet aggregation, overlap detection.
-
-**IPv6** - Expand, compress, binary conversion, type identification, subnet calculator.
-
-**Network diagnostics** - Ping, TCP port scan (single ports or ranges), traceroute, WHOIS, DNS/reverse DNS lookups.
-
-**MAC address** - Normalize, format (colon/dash/cisco/bare), OUI extraction, unicast/multicast/LAA detection.
-
-**Vendor helpers** - VLAN and ACL configuration generators for Cisco, Juniper, Huawei.
-
-**Cheatsheets** - Cisco VLAN, Cisco ACL, Huawei VLAN, MikroTik VLAN, Firewall (Palo Alto, Fortinet, iptables, nftables), Routing (static, OSPF, BGP), NAT.
-
-**Output** - ANSI colored terminal output (auto-detects TTY), JSON mode (`--json`), interactive REPL (`-i`).
+- **Conversions** - Binary, decimal, hexadecimal, IPv4, masks, CIDR, and wildcards.
+- **Address planning** - IPv4/IPv6 subnetting, VLSM, ranges, overlap checks, and supernets.
+- **Diagnostics** - Ping, port checks, traceroute, DNS, WHOIS, TLS certificates, and HTTP headers.
+- **Configuration** - VLAN and ACL generators for Cisco, Juniper, and Huawei.
+- **Reference** - VLAN, ACL, firewall, routing, and NAT cheatsheets.
+- **Automation** - Consistent JSON output, no-color mode, and an interactive REPL.
 
 ## Installation
 
-**Requirements:** Python >= 3.9
+Requires Python 3.9 or newer.
+
+Run directly from a clone:
 
 ```bash
 git clone https://github.com/franckferman/SysAdminToolbox.git
@@ -67,234 +37,167 @@ cd SysAdminToolbox
 python3 src/SysAdminToolbox/SysAdminToolbox.py --version
 ```
 
-Or install as a package:
+Or install the command in an isolated environment:
 
 ```bash
-pip install .
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
 SysAdminToolbox --version
 ```
 
+The calculations and socket-based checks use only the Python standard library. These optional diagnostics call operating-system tools when available:
+
+| Command | System tool |
+| --- | --- |
+| `net ping`, `net pingsweep` | `ping` |
+| `net traceroute`, `net traceroute-asn` | `traceroute` or `tracert` |
+| `net whois` | `whois` |
+| Advanced DNS and ASN lookups | `dig`, with `nslookup` fallback for record lookups |
+
 ## Usage
 
-The tool uses **subcommands** organized by category:
-
-```
+```text
 SysAdminToolbox <command> <operation> [arguments] [--json] [--no-color]
 ```
 
-Run without arguments to see the banner and help. Use `-i` for interactive mode:
+Quick examples:
 
 ```bash
-python3 src/SysAdminToolbox/SysAdminToolbox.py -i
+SysAdminToolbox subnet calc 192.168.1.42/24
+SysAdminToolbox subnet vlsm 192.168.1.0/24 50 30 10
+SysAdminToolbox convert ipinfo 192.168.1.42/24 --json
+SysAdminToolbox ipv6 ula
+SysAdminToolbox mac generate 5 cisco
+SysAdminToolbox net dns example.com
+SysAdminToolbox vendor vlan juniper 100 Guest ge-0/0/1 ge-0/0/2
 ```
 
-```
- +-----------------------------------------+
- |  SysAdminToolbox  v3.0.0                |
- |  Network Administration Suite           |
- +-----------------------------------------+
+Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the built-in reference. Run `SysAdminToolbox -i` for the interactive REPL.
 
-sat > subnet calc 192.168.1.0/24
-sat > net ping 8.8.8.8
-sat > convert d2b 42
-sat > help
-sat > exit
-```
+### Commands
 
-## Commands
+| Command | Operations |
+| --- | --- |
+| `convert` (`c`) | `d2b`, `b2d`, `d2h`, `h2d`, `b2h`, `h2b`, `iptobin`, `bintoip`, mask/CIDR/wildcard conversions, `ipinfo` |
+| `subnet` (`s`) | `calc`, `adv`, `vlsm`, `range`, `overlap`, `supernet` |
+| `ipv6` (`v6`) | `expand`, `compress`, `tobin`, `type`, `subnet`, `ula` |
+| `mac` (`m`) | `info`, `format`, `normalize`, `vendor`, `generate` |
+| `net` (`n`) | Ping and sweeps, TCP/UDP checks, traceroute, DNS, WHOIS, TLS, HTTP headers, ARP, random ports |
+| `vendor` (`v`) | `vlan`, `acl` |
+| `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
 
-### `convert` (alias: `c`)
-
-Base and format conversions.
-
-| Operation | Example |
-|---|---|
-| `d2b` | `convert d2b 42` |
-| `b2d` | `convert b2d 10101010` |
-| `d2h` | `convert d2h 255` |
-| `h2d` | `convert h2d ff` |
-| `b2h` | `convert b2h 11111111` |
-| `h2b` | `convert h2b ff` |
-| `iptobin` | `convert iptobin 192.168.1.1` |
-| `bintoip` | `convert bintoip 11000000.10101000.00000001.00000001` |
-| `m2c` | `convert m2c 255.255.255.0` |
-| `c2m` | `convert c2m 24` |
-| `m2w` | `convert m2w 255.255.255.0` |
-| `w2m` | `convert w2m 0.0.0.255` |
-| `c2w` | `convert c2w 24` |
-| `w2c` | `convert w2c 0.0.0.255` |
-
-### `subnet` (alias: `s`)
-
-Subnet calculations.
+### Conversions and address planning
 
 ```bash
-# Basic subnet calculator
-subnet calc 192.168.1.0/24
-subnet calc 10.0.0.1 255.255.0.0
+# Number and address formats
+SysAdminToolbox convert d2b 42
+SysAdminToolbox convert b2d 11111111
+SysAdminToolbox convert c2m 24
+SysAdminToolbox convert m2w 255.255.255.0
+SysAdminToolbox convert ipinfo 192.168.1.42/24
 
-# Advanced subnetting (IPv4 and IPv6)
-subnet adv 192.168.1.0/24 26
-subnet adv 2001:db8::/32 48
-
-# VLSM
-subnet vlsm 192.168.1.0/24 50 30 10
-
-# Check overlap
-subnet overlap 192.168.1.0/24 192.168.1.128/25
-
-# Find smallest supernet
-subnet supernet 192.168.1.0/26 192.168.1.64/26 192.168.1.128/25
+# Subnets and allocation
+SysAdminToolbox subnet calc 10.0.0.1 255.255.0.0
+SysAdminToolbox subnet adv 192.168.1.0/24 26
+SysAdminToolbox subnet adv 2001:db8::/32 48 --limit 32
+SysAdminToolbox subnet vlsm 192.168.1.0/24 50 30 10
+SysAdminToolbox subnet range 192.168.1.10 192.168.1.35
+SysAdminToolbox subnet overlap 192.168.1.0/24 192.168.1.128/25
+SysAdminToolbox subnet supernet 192.168.1.0/26 192.168.1.64/26
 ```
 
-### `ipv6` (alias: `v6`)
+`subnet adv` reports the exact number of subnets but limits detailed rows to 256 by default. Use `--limit` to change the displayed detail without accidentally materializing billions of IPv6 networks.
 
-IPv6 utilities.
+### IPv6 and MAC utilities
 
 ```bash
-ipv6 expand ::1
-ipv6 compress 2001:0db8:0000:0000:0000:0000:0000:0001
-ipv6 tobin fe80::1
-ipv6 type fe80::1          # -> link-local
-ipv6 subnet 2001:db8::/32
+SysAdminToolbox ipv6 expand 2001:db8::1
+SysAdminToolbox ipv6 compress 2001:0db8:0000:0000:0000:0000:0000:0001
+SysAdminToolbox ipv6 type fe80::1
+SysAdminToolbox ipv6 subnet 2001:db8::/64
+SysAdminToolbox ipv6 ula
+
+SysAdminToolbox mac info AA:BB:CC:DD:EE:FF
+SysAdminToolbox mac format aa:bb:cc:dd:ee:ff cisco
+SysAdminToolbox mac normalize aabb.ccdd.eeff
+SysAdminToolbox mac generate 5 colon
 ```
 
-### `net` (alias: `n`)
+`mac vendor` extracts the OUI. It deliberately does not ship a stale vendor database; authoritative vendor resolution requires the current IEEE registry.
 
-Network diagnostics, scanning, and reconnaissance.
+### Network diagnostics
 
 ```bash
-# Ping
-net ping 8.8.8.8
-net pingsweep 192.168.1.0/24
+# Reachability and TCP/UDP checks
+SysAdminToolbox net ping 192.168.1.1
+SysAdminToolbox net pingsweep 192.168.1.0/24
+SysAdminToolbox net portscan 192.168.1.1 22 80 443
+SysAdminToolbox net portscan-adv 192.168.1.1 top20 banner
+SysAdminToolbox net portscan-udp 192.168.1.1 53 161
+SysAdminToolbox net portscan-net 192.168.1.0/24 22
+SysAdminToolbox net banner 192.168.1.1 80
 
-# Port scanning
-net portscan 192.168.1.1 22 80 443
-net portscan 192.168.1.1 20-25
-net portscan-adv 192.168.1.1 top20
-net portscan-adv 192.168.1.1 22 80 443 banner
-net portscan-udp 192.168.1.1 53 161
-net portscan-net 192.168.1.0/24 22
-net banner 192.168.1.1 80
+# Routing, DNS, TLS, and HTTP
+SysAdminToolbox net traceroute example.com
+SysAdminToolbox net traceroute-asn example.com
+SysAdminToolbox net dns example.com
+SysAdminToolbox net dns-type example.com MX
+SysAdminToolbox net dns-compare example.com 1.1.1.1 8.8.8.8
+SysAdminToolbox net rdns 192.0.2.1
+SysAdminToolbox net certcheck example.com
+SysAdminToolbox net headers https://example.com
+SysAdminToolbox net whois example.com
 
-# Traceroute
-net traceroute google.com
-net traceroute-asn google.com          # with ASN/country per hop
-
-# DNS
-net dns example.com
-net dns-type google.com MX
-net dns-type google.com TXT 8.8.8.8    # query specific server
-net dns-compare google.com 8.8.8.8 1.1.1.1
-net dns-axfr example.com
-net rdns 8.8.8.8
-net rdns-sweep 192.168.1.0/24
-
-# TLS / HTTP
-net certcheck google.com
-net certcheck google.com 8443          # custom port
-net headers https://google.com
-
-# Local network
-net arp
-net whois google.com
+# Candidate ports are generated, not probed
+SysAdminToolbox net random-ports 49152 65535 10
 ```
 
-### `mac` (alias: `m`)
+Network-wide operations are capped at 4096 hosts to prevent accidental memory or traffic spikes. Use diagnostic and scanning commands only on systems you administer or are authorized to test.
 
-MAC address utilities.
+### Vendor helpers and cheatsheets
 
 ```bash
-mac info AA:BB:CC:DD:EE:FF
-mac format aa:bb:cc:dd:ee:ff cisco    # -> aabb.ccdd.eeff
-mac format AA-BB-CC-DD-EE-FF bare     # -> aabbccddeeff
-mac normalize aabb.ccdd.eeff          # -> aa:bb:cc:dd:ee:ff
-mac vendor AA:BB:CC:DD:EE:FF
+SysAdminToolbox vendor vlan cisco 10 Engineering Gi0/1 Gi0/2
+SysAdminToolbox vendor vlan juniper 10 Engineering ge-0/0/1 ge-0/0/2
+SysAdminToolbox vendor vlan huawei 100 MGMT GE0/0/1 GE0/0/2
+SysAdminToolbox vendor acl cisco BLOCK deny tcp 192.168.1.0/24 any 0 443
+
+SysAdminToolbox cheat vlan trunk
+SysAdminToolbox cheat firewall nftables
+SysAdminToolbox cheat routing ospf
+SysAdminToolbox cheat nat cisco_pat
 ```
 
-### `vendor` (alias: `v`)
+Generated configuration is a starting point. Review interface names, platform syntax, policy order, and change-control requirements before applying it.
 
-Generate vendor-specific configuration commands.
+### JSON and terminal output
+
+`--json` works before or after the subcommand and returns valid JSON for every operation. Colors disable automatically when output is redirected; `--no-color` and the `NO_COLOR` environment variable disable them explicitly.
 
 ```bash
-vendor vlan cisco 10 Engineering Gi0/1-15
-vendor vlan juniper 10 Engineering
-vendor vlan huawei 100 MGMT GE0/0/1 GE0/0/2
-vendor acl cisco BLOCK deny tcp 192.168.1.0/24 any 0 80
+SysAdminToolbox --json subnet calc 10.0.0.0/8
+SysAdminToolbox subnet calc 10.0.0.0/8 --json | jq '.first_host'
+SysAdminToolbox --no-color ipv6 type fd00::1
 ```
 
-### `cheat` (alias: `cs`)
+## Tests
 
-Configuration cheatsheets.
+The standard-library test suite covers calculations, validation, every deterministic CLI operation, JSON behavior, vendor output, command parsers, and loopback-only network checks.
 
 ```bash
-cheat vlan              # all Cisco VLAN sections
-cheat vlan trunk        # specific section
-cheat acl
-cheat huawei
-cheat mikrotik
-cheat firewall          # Palo Alto, Fortinet, iptables, nftables
-cheat firewall iptables # specific vendor
-cheat routing           # static, OSPF, BGP
-cheat routing ospf
-cheat nat
-cheat nat cisco_pat
+python3 -m compileall -q src
+python3 -m unittest discover -s tests -v
 ```
-
-### Global flags
-
-| Flag | Description |
-|---|---|
-| `--json` | Output in JSON format (works with any command) |
-| `--no-color` | Disable ANSI colors |
-| `--version` | Show version |
-| `-i` | Interactive REPL mode |
-
-```bash
-# JSON output
-subnet calc 10.0.0.0/8 --json
-net ping 8.8.8.8 --json
-
-# Pipe-friendly
-subnet calc 10.0.0.0/8 --json | jq '.first_host'
-```
-
-## Troubleshooting
-
-Encountering issues? [Submit an issue on GitHub](https://github.com/franckferman/SysAdminToolbox/issues).
-
-Some commands require system tools:
-- `net traceroute` requires `traceroute` (`apt install traceroute`)
-- `net whois` requires `whois` (`apt install whois`)
-- `net ping` requires `ping` (usually pre-installed)
-
-<p align="right">(<a href="#top">Back to top</a>)</p>
 
 ## Contributing
 
-Contributions, feedback, and suggestions are welcome. Feel free to open an issue or submit a pull request.
-
-<p align="right">(<a href="#top">Back to top</a>)</p>
+Issues and pull requests are welcome. Include a focused test for behavior changes and keep runtime code dependency-free.
 
 ## License
 
-This project is licensed under the GNU Affero General Public License, Version 3.0. See the [LICENSE](https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE) file.
-
-<p align="right">(<a href="#top">Back to top</a>)</p>
+SysAdminToolbox is available under the [MIT License](LICENSE).
 
 ## Contact
 
-[![ProtonMail][protonmail-shield]](mailto:contact@franckferman.fr)
-[![LinkedIn][linkedin-shield]](https://www.linkedin.com/in/franckferman)
-[![Twitter][twitter-shield]](https://www.twitter.com/franckferman)
-
-<p align="right">(<a href="#top">Back to top</a>)</p>
-
-[contributors-shield]: https://img.shields.io/github/contributors/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[forks-shield]: https://img.shields.io/github/forks/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[stars-shield]: https://img.shields.io/github/stars/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[issues-shield]: https://img.shields.io/github/issues/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[license-shield]: https://img.shields.io/github/license/franckferman/SysAdminToolbox.svg?style=for-the-badge
-[protonmail-shield]: https://img.shields.io/badge/ProtonMail-8B89CC?style=for-the-badge&logo=protonmail&logoColor=blueviolet
-[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=blue
-[twitter-shield]: https://img.shields.io/badge/-Twitter-black.svg?style=for-the-badge&logo=twitter&colorB=blue
+Franck Ferman - [GitHub](https://github.com/franckferman) - [contact@franckferman.fr](mailto:contact@franckferman.fr)

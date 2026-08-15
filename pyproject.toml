@@ -1,26 +1,40 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "SysAdminToolbox"
-version = "3.1.0"
-description = "Versatile tool designed for network administration, providing a wide range of useful calculations."
+version = "3.2.0"
+description = "Dependency-free network administration CLI for calculations, diagnostics, and configuration helpers."
 authors = [{ name = "Franck Ferman", email = "contact@franckferman.fr" }]
 license = { file = "LICENSE" }
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: System :: Networking",
     "Topic :: Utilities"
 ]
 readme = { file = "README.md", content-type = "text/markdown" }
-keywords = ["networking", "administration", "sysadmin", "tools", "utilities"]
+keywords = [
+    "sysadmin", "networking", "cli", "subnet", "cidr", "ipv4", "ipv6",
+    "vlsm", "vlan", "dns", "network-diagnostics", "network-automation"
+]
 requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/franckferman/SysAdminToolbox"
+Repository = "https://github.com/franckferman/SysAdminToolbox.git"
+Issues = "https://github.com/franckferman/SysAdminToolbox/issues"
 
 [project.scripts]
 SysAdminToolbox = "SysAdminToolbox.SysAdminToolbox:main"

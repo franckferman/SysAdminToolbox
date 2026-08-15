@@ -61,6 +61,16 @@ class Colors:
         print(f"{c.GREEN}OK{c.RESET}")
     """
 
+    RED: str
+    GREEN: str
+    YELLOW: str
+    BLUE: str
+    MAGENTA: str
+    CYAN: str
+    BOLD: str
+    DIM: str
+    RESET: str
+
     _CODES = {
         "RED":     "\033[31m",
         "GREEN":   "\033[32m",
