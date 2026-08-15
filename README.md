@@ -12,7 +12,7 @@ Zero runtime Python dependencies. Standard library only.
 
 ## About
 
-SysAdminToolbox is a self-contained CLI for day-to-day network administration. It brings address and subnet calculations, IPv6 and MAC utilities, diagnostics, vendor configuration helpers, and concise cheatsheets into one installable Python package.
+SysAdminToolbox provides network calculations, diagnostics, and configuration generation through a Python command-line interface.
 
 - **Conversions** - Binary, decimal, hexadecimal, IPv4, masks, CIDR, and wildcards.
 - **Address planning** - IPv4/IPv6 subnetting, VLSM, ranges, overlap checks, and supernets.
@@ -25,17 +25,20 @@ SysAdminToolbox is a self-contained CLI for day-to-day network administration. I
 
 Requires Python 3.9 or newer.
 
-Run directly from a clone:
+Install directly from GitHub without cloning the repository:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install https://github.com/franckferman/SysAdminToolbox/archive/refs/heads/stable.zip
+SysAdminToolbox --version
+```
+
+Clone the repository to inspect or modify the source:
 
 ```bash
 git clone https://github.com/franckferman/SysAdminToolbox.git
 cd SysAdminToolbox
-python3 src/SysAdminToolbox/SysAdminToolbox.py --version
-```
-
-Or install the command in an isolated environment:
-
-```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install .
@@ -188,13 +191,9 @@ python3 -m unittest discover -s tests -v
 
 CI installs the package and runs the suite on Python 3.9 through 3.14 on Linux, with additional Python 3.14 jobs on Windows and macOS.
 
-## Contributing
-
-Issues and pull requests are welcome. Include a focused test for behavior changes and keep runtime code dependency-free.
-
 ## License
 
-SysAdminToolbox is available under the [MIT License](LICENSE).
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for the full text.
 
 ## Contact
 
