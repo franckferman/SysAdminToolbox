@@ -2,41 +2,48 @@
 # -*- coding: utf-8 -*-
 
 """
-Versatile tool designed for network administration, providing a wide range of useful calculations.
+Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.0.0
-License  : GNU Affero General Public License v3.0
+Version  : 3.2.0
+License  : MIT
 
 Repository:
     https://github.com/franckferman/SysAdminToolbox
 License details:
-    See the LICENSE file or https://www.gnu.org/licenses/agpl-3.0.html
+    See the LICENSE file.
 """
 
 import argparse
 import ipaddress
+import itertools
 import platform
 import re
+import secrets
+import shlex
 import socket
 import ssl
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, cast
 
 try:
     from SysAdminToolbox.colors import colored_subnet_output, colors_enabled
     from SysAdminToolbox.output import output, set_json_mode, is_json_mode
 except ImportError:
-    from colors import colored_subnet_output, colors_enabled
-    from output import output, set_json_mode, is_json_mode
+    from colors import colored_subnet_output, colors_enabled  # type: ignore[import-not-found,no-redef]
+    from output import output, set_json_mode, is_json_mode  # type: ignore[import-not-found,no-redef]
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
+
+MAX_SUBNET_DETAILS = 256
+MAX_NETWORK_HOSTS = 4096
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +63,8 @@ def _validate_ip(ip: str) -> str:
 def _validate_mask(mask: str) -> str:
     _validate_ip(mask)
     bits = ''.join(format(int(o), '08b') for o in mask.split('.'))
-    if '01' in bits.replace('0', '', 1) or ('1' in bits and bits.index('0') < bits.rindex('1') if '0' in bits and '1' in bits else False):
-        clean = bits.rstrip('0')
-        if '0' in clean:
-            raise ValueError(f"Invalid subnet mask: '{mask}' (non-contiguous bits)")
+    if '01' in bits:
+        raise ValueError(f"Invalid subnet mask: '{mask}' (non-contiguous bits)")
     return mask
 
 
@@ -89,25 +94,43 @@ def _validate_vlan_id(vlan_id: int) -> int:
 # ---------------------------------------------------------------------------
 
 def decimal_to_binary(decimal: int) -> str:
-    return bin(decimal if decimal >= 0 else (decimal + (1 << 8)))[2:]
+    prefix = '-' if decimal < 0 else ''
+    return prefix + bin(abs(decimal))[2:]
 
 
 def decimal_to_binary_signed(decimal: int, bits: int = 8) -> str:
+    if bits < 1:
+        raise ValueError("Signed width must be at least 1 bit")
+    minimum = -(1 << (bits - 1))
+    maximum = (1 << (bits - 1)) - 1
+    if not minimum <= decimal <= maximum:
+        raise ValueError(
+            f"{decimal} does not fit in a signed {bits}-bit integer "
+            f"({minimum} to {maximum})"
+        )
     return format(decimal & ((1 << bits) - 1), f'0{bits}b')
 
 
 def decimal_to_binary_values(decimal: int) -> dict:
     return {
         "decimal": decimal,
-        "unsigned": decimal_to_binary(decimal),
-        "signed_8bit": decimal_to_binary_signed(decimal),
+        "binary": decimal_to_binary(decimal),
+        "unsigned": decimal_to_binary(decimal) if decimal >= 0 else None,
+        "signed_8bit": (
+            decimal_to_binary_signed(decimal)
+            if -128 <= decimal <= 127
+            else None
+        ),
     }
 
 
 def print_binary_info(info: dict) -> None:
     print(f"Original value                : {info['decimal']}")
-    print(f"Unsigned binary               : {info['unsigned']}")
-    print(f"Signed (2's complement, 8-bit): {info['signed_8bit']}")
+    print(f"Binary                        : {info['binary']}")
+    unsigned = info['unsigned'] if info['unsigned'] is not None else "not applicable"
+    print(f"Unsigned binary               : {unsigned}")
+    signed = info['signed_8bit'] if info['signed_8bit'] is not None else "not representable"
+    print(f"Signed (2's complement, 8-bit): {signed}")
 
 
 def binary_to_decimal(binary: str, signed_bits: int = 8) -> int:
@@ -270,6 +293,46 @@ def binary_to_address(binaries: List[str]) -> str:
     return '\n'.join(binary_to_ip(b) for b in binaries)
 
 
+def ipv4_info(value: str) -> Dict[str, Any]:
+    """Return common integer, hexadecimal, binary, and network forms."""
+    try:
+        interface = ipaddress.IPv4Interface(value if '/' in value else f"{value}/32")
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError) as exc:
+        raise ValueError(f"Invalid IPv4 address or interface: '{value}' ({exc})")
+
+    address = interface.ip
+    network = interface.network
+    result = {
+        "address": str(address),
+        "integer": int(address),
+        "hexadecimal": f"0x{int(address):08X}",
+        "binary": ip_to_binary(str(address)),
+        "ipv4_mapped_ipv6": f"::ffff:{address}",
+        "reverse_pointer": address.reverse_pointer,
+    }
+    if '/' in value:
+        result.update({
+            "network": str(network),
+            "prefix_length": interface.network.prefixlen,
+            "netmask": str(network.netmask),
+            "last_address": str(network.broadcast_address),
+            "num_addresses": network.num_addresses,
+        })
+    return result
+
+
+def ipv4_range_to_cidrs(first: str, last: str) -> List[str]:
+    """Return the exact minimal CIDR set covering an inclusive IPv4 range."""
+    try:
+        start = ipaddress.IPv4Address(first)
+        end = ipaddress.IPv4Address(last)
+    except ipaddress.AddressValueError as exc:
+        raise ValueError(f"Invalid IPv4 range: {exc}")
+    if int(start) > int(end):
+        raise ValueError("First IPv4 address must not exceed the last address")
+    return [str(net) for net in ipaddress.summarize_address_range(start, end)]
+
+
 # ---------------------------------------------------------------------------
 #  Subnet calculators
 # ---------------------------------------------------------------------------
@@ -281,22 +344,41 @@ def subnet_calculator(network: str, mask: str) -> Dict[str, Any]:
     net = ipaddress.ip_network(f"{network}/{cidr}", strict=False)
 
     num = net.num_addresses
+    if net.prefixlen == 32:
+        usable = 1
+        first_host = last_host = str(net.network_address)
+        broadcast = "N/A"
+    elif net.prefixlen == 31:
+        usable = 2
+        first_host = str(net.network_address)
+        last_host = str(net.broadcast_address)
+        broadcast = "N/A"
+    else:
+        usable = num - 2
+        first_host = str(net[1])
+        last_host = str(net[-2])
+        broadcast = str(net.broadcast_address)
+
     return {
         "network_address": str(net.network_address),
         "netmask": str(net.netmask),
         "wildcard": mask_to_wildcard(str(net.netmask)),
         "cidr": f"/{cidr}",
         "num_addresses": num,
-        "hosts": num - 2 if num > 2 else 0,
-        "first_host": str(net[1]) if num > 1 else "N/A",
-        "last_host": str(net[-2]) if num > 2 else "N/A",
-        "broadcast": str(net.broadcast_address),
+        "hosts": usable,
+        "first_host": first_host,
+        "last_host": last_host,
+        "broadcast": broadcast,
         "is_private": net.is_private,
         "is_global": net.is_global,
     }
 
 
-def advanced_subnet_calculator(ip_address: str, new_mask: str) -> Dict[str, Any]:
+def advanced_subnet_calculator(
+    ip_address: str,
+    new_mask: str,
+    max_details: int = MAX_SUBNET_DETAILS,
+) -> Dict[str, Any]:
     if '/' not in ip_address:
         raise ValueError("IP address must include CIDR notation (e.g., '192.168.1.0/24' or '2001:db8::/32')")
 
@@ -326,28 +408,55 @@ def advanced_subnet_calculator(ip_address: str, new_mask: str) -> Dict[str, Any]
 
     network = ipaddress.ip_network(f"{ip}/{original_cidr}", strict=False)
     num = network.num_addresses
-    sub_objects = list(network.subnets(new_prefix=new_cidr))
-    hosts_per = (2 ** (max_bits - new_cidr)) - 2 if new_cidr < (max_bits - 1) else 0
+    if max_details < 0:
+        raise ValueError("max_details must be zero or greater")
+    count_subnets = 1 << (new_cidr - original_cidr)
+    sub_objects: List[Any] = list(itertools.islice(
+        network.subnets(new_prefix=new_cidr),
+        min(count_subnets, max_details),
+    ))
+    addresses_per = 1 << (max_bits - new_cidr)
+    if is_v6:
+        hosts_per = addresses_per
+    elif new_cidr == 32:
+        hosts_per = 1
+    elif new_cidr == 31:
+        hosts_per = 2
+    else:
+        hosts_per = addresses_per - 2
 
-    subnets_detail = []
+    subnets_detail: List[Dict[str, Any]] = []
     for s in sub_objects:
-        sn = s.num_addresses
-        subnets_detail.append({
-            "network": str(s.network_address),
-            "cidr": f"/{new_cidr}",
-            "first_host": str(s.network_address + 1) if sn > 1 else "N/A",
-            "last_host": str(s.broadcast_address - 1) if sn > 2 else "N/A",
-            "broadcast": str(s.broadcast_address),
-            "usable_hosts": sn - 2 if sn > 2 else 0,
-        })
+        if is_v6:
+            subnets_detail.append({
+                "network": str(s.network_address),
+                "cidr": f"/{new_cidr}",
+                "first_address": str(s.network_address),
+                "last_address": str(s.broadcast_address),
+                "num_addresses": s.num_addresses,
+            })
+        else:
+            detail = subnet_calculator(str(s.network_address), str(s.netmask))
+            subnets_detail.append({
+                "network": str(s.network_address),
+                "cidr": f"/{new_cidr}",
+                "first_host": detail["first_host"],
+                "last_host": detail["last_host"],
+                "broadcast": detail["broadcast"],
+                "usable_hosts": detail["hosts"],
+            })
 
-    result = {
+    result: Dict[str, Any] = {
         "original_cidr": f"/{original_cidr}",
         "new_cidr": f"/{new_cidr}",
-        "original_hosts": num - 2 if num > 2 else 0,
+        "original_hosts": num if is_v6 else subnet_calculator(
+            str(network.network_address), str(network.netmask)
+        )["hosts"],
         "hosts_per_subnet": hosts_per,
         "is_private": network.is_private,
-        "count_subnets": len(subnets_detail),
+        "count_subnets": count_subnets,
+        "shown_subnets": len(subnets_detail),
+        "truncated": len(subnets_detail) < count_subnets,
         "subnets": subnets_detail,
     }
     if not is_v6:
@@ -363,8 +472,12 @@ def advanced_subnet_calculator(ip_address: str, new_mask: str) -> Dict[str, Any]
 def vlsm_calculator(network: str, hosts: List[int]) -> List[Dict[str, Any]]:
     sorted_hosts = sorted(hosts, reverse=True)
     subnets = []
-    ip_network_obj = ipaddress.ip_network(network, strict=False)
-    current = ip_network_obj
+    try:
+        ip_network_obj = ipaddress.IPv4Network(network, strict=False)
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError) as exc:
+        raise ValueError(f"Invalid IPv4 network: '{network}' ({exc})")
+    cursor = int(ip_network_obj.network_address)
+    pool_end = int(ip_network_obj.broadcast_address) + 1
 
     for host_count in sorted_hosts:
         if host_count < 1:
@@ -373,17 +486,15 @@ def vlsm_calculator(network: str, hosts: List[int]) -> List[Dict[str, Any]]:
         prefix = 32 - (needed - 1).bit_length()
         _validate_cidr(prefix)
 
-        if prefix < current.prefixlen:
+        if prefix < ip_network_obj.prefixlen:
             raise ValueError(
-                f"Cannot fit {host_count} hosts (/{prefix}) in remaining space "
-                f"(/{current.prefixlen})"
+                f"Cannot fit {host_count} hosts (/{prefix}) in {ip_network_obj}"
             )
-
-        candidates = list(current.subnets(new_prefix=prefix))
-        if not candidates:
-            raise ValueError(f"No space left for {host_count} hosts")
-
-        new_sub = candidates[0]
+        block_size = 1 << (32 - prefix)
+        cursor = ((cursor + block_size - 1) // block_size) * block_size
+        if cursor + block_size > pool_end:
+            raise ValueError(f"No space left for {host_count} hosts (/{prefix})")
+        new_sub = ipaddress.IPv4Network((cursor, prefix))
         subnets.append({
             "requested_hosts": host_count,
             "subnet": str(new_sub.network_address),
@@ -398,10 +509,7 @@ def vlsm_calculator(network: str, hosts: List[int]) -> List[Dict[str, Any]]:
             "is_global": new_sub.is_global,
         })
 
-        if len(candidates) > 1:
-            current = candidates[1]
-        else:
-            break
+        cursor += block_size
 
     return subnets
 
@@ -451,15 +559,12 @@ def ipv6_subnet_calculator(network: str) -> Dict[str, Any]:
     prefix = net.prefixlen
     num_addresses = net.num_addresses
 
-    first_host = str(net.network_address + 1) if num_addresses > 1 else "N/A"
-    last_host = str(net.broadcast_address - 1) if num_addresses > 2 else "N/A"
-
     return {
         "network_address": str(net.network_address),
         "prefix_length": prefix,
         "num_addresses": str(num_addresses),
-        "first_host": first_host,
-        "last_host": last_host,
+        "first_address": str(net.network_address),
+        "last_address": str(net.broadcast_address),
         "is_private": net.is_private,
         "is_link_local": net.network_address.is_link_local,
         "is_multicast": net.network_address.is_multicast,
@@ -485,12 +590,12 @@ def ipv6_type(addr: str) -> str:
     doc_prefix = ipaddress.IPv6Network('2001:db8::/32')
     if obj in doc_prefix:
         return "documentation"
-    if obj.is_global:
-        return "global unicast"
     if obj.ipv4_mapped is not None:
         return "ipv4-mapped"
     if int(obj) >> 96 == 0x0064_ff9b:
         return "ipv4-translated (NAT64)"
+    if obj.is_global:
+        return "global unicast"
     if obj.is_reserved:
         return "reserved"
     # Catch-all for remaining global-scope addresses that Python
@@ -499,6 +604,18 @@ def ipv6_type(addr: str) -> str:
         return "global unicast"
 
     return "unknown"
+
+
+def generate_ipv6_ula() -> Dict[str, str]:
+    """Generate a locally assigned RFC 4193 ULA /48 from 40 random bits."""
+    global_id = secrets.token_bytes(5).hex()
+    prefix = f"fd{global_id[:2]}:{global_id[2:6]}:{global_id[6:10]}"
+    return {
+        "global_id": global_id.upper(),
+        "prefix": f"{prefix}::/48",
+        "first_subnet": f"{prefix}:0::/64",
+        "example_subnet": f"{prefix}:1::/64",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -547,10 +664,54 @@ def reverse_dns_lookup(ip: str, timeout: int = 5) -> Dict[str, Any]:
 #  VLAN helper
 # ---------------------------------------------------------------------------
 
+def _validate_config_name(value: str, label: str, max_length: int = 64) -> str:
+    if not re.fullmatch(rf'[A-Za-z0-9_.-]{{1,{max_length}}}', value):
+        raise ValueError(
+            f"Invalid {label}: '{value}' (use letters, numbers, '.', '_', or '-')"
+        )
+    return value
+
+
+def _validate_interface(value: str) -> str:
+    if not re.fullmatch(r'[A-Za-z0-9./:_-]+', value):
+        raise ValueError(f"Invalid interface name: '{value}'")
+    return value
+
+
+def _cisco_acl_address(value: str) -> str:
+    value = value.strip()
+    if value.lower() == 'any':
+        return 'any'
+    try:
+        if '/' in value:
+            network = ipaddress.IPv4Network(value, strict=False)
+            return f"{network.network_address} {network.hostmask}"
+        address = ipaddress.IPv4Address(value)
+        return f"host {address}"
+    except ipaddress.AddressValueError as exc:
+        raise ValueError(f"Invalid Cisco ACL address: '{value}' ({exc})")
+
+
+def _junos_acl_address(value: str) -> str:
+    value = value.strip()
+    if value.lower() == 'any':
+        return '0.0.0.0/0'
+    try:
+        return str(ipaddress.IPv4Network(
+            value if '/' in value else f"{value}/32", strict=False
+        ))
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError) as exc:
+        raise ValueError(f"Invalid Juniper ACL address: '{value}' ({exc})")
+
 def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
                 ports: Optional[List[str]] = None) -> str:
     _validate_vlan_id(vlan_id)
     v = vendor.lower()
+    if vlan_name:
+        _validate_config_name(vlan_name, "VLAN name", max_length=32)
+    if ports:
+        for port in ports:
+            _validate_interface(port)
 
     if v == 'cisco':
         lines = [
@@ -559,7 +720,7 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
         ]
         if vlan_name:
             lines.append(f" name {vlan_name}")
-        port_range = ', '.join(ports) if ports else 'Gi0/1-24'
+        port_range = ','.join(ports) if ports else 'Gi0/1-24'
         lines += [
             f"interface range {port_range}",
             " switchport mode access",
@@ -569,13 +730,16 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
         ]
     elif v == 'juniper':
         name = vlan_name or f'vlan-{vlan_id}'
-        iface = ', '.join(ports) if ports else 'ge-0/0/0'
+        interfaces = ports or ['ge-0/0/0']
         lines = [
             "configure",
             f"set vlans {name} vlan-id {vlan_id}",
-            f"set interfaces {iface} unit 0 family ethernet-switching vlan members {name}",
-            "commit and-quit",
         ]
+        lines.extend(
+            f"set interfaces {iface} unit 0 family ethernet-switching vlan members {name}"
+            for iface in interfaces
+        )
+        lines.append("commit and-quit")
     elif v == 'huawei':
         lines = [
             "system-view",
@@ -594,7 +758,9 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
                 ]
         lines.append("return")
     else:
-        return f"Unsupported vendor: '{vendor}'. Supported: cisco, juniper, huawei."
+        raise ValueError(
+            f"Unsupported vendor: '{vendor}'. Supported: cisco, juniper, huawei."
+        )
 
     return '\n'.join(lines)
 
@@ -609,14 +775,25 @@ def acl_helper(vendor: str, acl_name: str, action: str, protocol: str,
                dst_port: Optional[int] = None) -> str:
     if action.lower() not in ('permit', 'deny'):
         raise ValueError(f"Invalid action: '{action}' (must be 'permit' or 'deny')")
+    _validate_config_name(acl_name, "ACL name")
     v = vendor.lower()
+    action = action.lower()
+    protocol = protocol.lower()
+    _validate_config_name(protocol, "protocol", max_length=32)
+    for port in (src_port, dst_port):
+        if port is not None:
+            _validate_port(port)
+    if (src_port is not None or dst_port is not None) and protocol not in ('tcp', 'udp'):
+        raise ValueError("Source and destination ports require TCP or UDP")
 
     if v == 'cisco':
-        entry = f"{action} {protocol} {src}"
-        if src_port:
+        src_value = _cisco_acl_address(src)
+        dst_value = _cisco_acl_address(dst)
+        entry = f"{action} {protocol} {src_value}"
+        if src_port is not None:
             entry += f" eq {src_port}"
-        entry += f" {dst}"
-        if dst_port:
+        entry += f" {dst_value}"
+        if dst_port is not None:
             entry += f" eq {dst_port}"
         lines = [
             "configure terminal",
@@ -627,19 +804,28 @@ def acl_helper(vendor: str, acl_name: str, action: str, protocol: str,
             "write memory",
         ]
     elif v == 'juniper':
-        from_clause = f"from protocol {protocol} source-address {src} destination-address {dst}"
-        if src_port:
-            from_clause += f" source-port {src_port}"
-        if dst_port:
-            from_clause += f" destination-port {dst_port}"
+        base = f"set firewall family inet filter {acl_name} term RULE"
+        src_value = _junos_acl_address(src)
+        dst_value = _junos_acl_address(dst)
         lines = [
             "configure",
-            f"set firewall family inet filter {acl_name} term RULE {from_clause}",
-            f"set firewall family inet filter {acl_name} term RULE then {action}",
-            "commit and-quit",
         ]
+        if protocol != 'ip':
+            lines.append(f"{base} from protocol {protocol}")
+        lines.extend([
+            f"{base} from source-address {src_value}",
+            f"{base} from destination-address {dst_value}",
+        ])
+        if src_port is not None:
+            lines.append(f"{base} from source-port {src_port}")
+        if dst_port is not None:
+            lines.append(f"{base} from destination-port {dst_port}")
+        junos_action = "accept" if action == "permit" else "discard"
+        lines.extend([f"{base} then {junos_action}", "commit and-quit"])
     else:
-        return f"Unsupported vendor: '{vendor}'. Supported: cisco, juniper."
+        raise ValueError(
+            f"Unsupported vendor: '{vendor}'. Supported: cisco, juniper."
+        )
 
     return '\n'.join(lines)
 
@@ -1147,6 +1333,18 @@ def mac_info(mac: str) -> Dict[str, Any]:
     }
 
 
+def generate_local_macs(count: int = 1, style: str = "colon") -> List[str]:
+    """Generate cryptographically random locally administered unicast MACs."""
+    if not 1 <= count <= 100:
+        raise ValueError("MAC quantity must be between 1 and 100")
+    results = []
+    for _ in range(count):
+        raw = bytearray(secrets.token_bytes(6))
+        raw[0] = (raw[0] | 0x02) & 0xFE
+        results.append(mac_format(raw.hex(), style))
+    return results
+
+
 # ---------------------------------------------------------------------------
 #  Supernet / overlap utilities
 # ---------------------------------------------------------------------------
@@ -1159,13 +1357,13 @@ def supernet(networks: List[str]) -> str:
     """
     if not networks:
         raise ValueError("Network list must not be empty")
-    nets = [ipaddress.ip_network(n, strict=False) for n in networks]
+    nets: List[Any] = [ipaddress.ip_network(n, strict=False) for n in networks]
 
     versions = {n.version for n in nets}
     if len(versions) > 1:
         raise ValueError("Cannot mix IPv4 and IPv6 networks")
 
-    collapsed = list(ipaddress.collapse_addresses(nets))
+    collapsed: List[Any] = list(ipaddress.collapse_addresses(nets))
     if len(collapsed) == 1:
         return str(collapsed[0])
 
@@ -1200,27 +1398,13 @@ def check_overlap(net1: str, net2: str) -> Dict[str, Any]:
     n1 = ipaddress.ip_network(net1, strict=False)
     n2 = ipaddress.ip_network(net2, strict=False)
 
+    if n1.version != n2.version:
+        raise ValueError("Cannot compare IPv4 and IPv6 networks")
+
     overlaps = n1.overlaps(n2)
-    overlap_network = None
+    overlap_network: Optional[str] = None
     if overlaps:
-        start = max(int(n1.network_address), int(n2.network_address))
-        end = min(int(n1.broadcast_address), int(n2.broadcast_address))
-        if n1.version == 4:
-            addr_cls = ipaddress.IPv4Address
-            net_cls = ipaddress.IPv4Network
-        else:
-            addr_cls = ipaddress.IPv6Address
-            net_cls = ipaddress.IPv6Network
-        summary = list(ipaddress.summarize_address_range(
-            addr_cls(start), addr_cls(end)
-        ))
-        if len(summary) == 1:
-            overlap_network = str(summary[0])
-        else:
-            overlap_network = str(net_cls(
-                f"{addr_cls(start)}/{min(n1.prefixlen, n2.prefixlen)}",
-                strict=False,
-            ))
+        overlap_network = str(n1 if n1.prefixlen >= n2.prefixlen else n2)
 
     return {
         "network1": str(n1),
@@ -1235,7 +1419,7 @@ def check_overlap(net1: str, net2: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _validate_host(host: str) -> str:
-    """Validate that *host* is a valid IPv4 address or resolvable hostname."""
+    """Validate that *host* is a valid IPv4 address or hostname."""
     try:
         ipaddress.IPv4Address(host)
         return host
@@ -1310,9 +1494,20 @@ def ping_host(host: str, count: int = 4, timeout: int = 2) -> Dict[str, Any]:
         output,
         re.DOTALL,
     )
+    if not pkt_match and system == "windows":
+        pkt_match = re.search(
+            r'Sent\s*=\s*(\d+).*?Received\s*=\s*(\d+).*?'
+            r'\(([\d.]+)%\s*loss\)',
+            output,
+            re.IGNORECASE | re.DOTALL,
+        )
     packets_sent = int(pkt_match.group(1)) if pkt_match else count
-    packets_received = int(pkt_match.group(2)) if pkt_match else 0
-    packet_loss_pct = float(pkt_match.group(3)) if pkt_match else 100.0
+    packets_received = (
+        int(pkt_match.group(2)) if pkt_match else (count if proc.returncode == 0 else 0)
+    )
+    packet_loss_pct = (
+        float(pkt_match.group(3)) if pkt_match else (0.0 if proc.returncode == 0 else 100.0)
+    )
 
     # -- parse RTT stats ---------------------------------------------------
     # Linux : "rtt min/avg/max/mdev = 0.028/0.042/0.068/0.015 ms"
@@ -1322,9 +1517,23 @@ def ping_host(host: str, count: int = 4, timeout: int = 2) -> Dict[str, Any]:
         r'([\d.]+)/([\d.]+)/([\d.]+)',
         output,
     )
-    min_ms = float(rtt_match.group(1)) if rtt_match else None
-    avg_ms = float(rtt_match.group(2)) if rtt_match else None
-    max_ms = float(rtt_match.group(3)) if rtt_match else None
+    min_ms: Optional[float]
+    avg_ms: Optional[float]
+    max_ms: Optional[float]
+    if rtt_match:
+        min_ms = float(rtt_match.group(1))
+        avg_ms = float(rtt_match.group(2))
+        max_ms = float(rtt_match.group(3))
+    else:
+        windows_rtt = re.search(
+            r'Minimum\s*=\s*([\d.]+)ms.*?Maximum\s*=\s*([\d.]+)ms.*?'
+            r'Average\s*=\s*([\d.]+)ms',
+            output,
+            re.IGNORECASE | re.DOTALL,
+        )
+        min_ms = float(windows_rtt.group(1)) if windows_rtt else None
+        max_ms = float(windows_rtt.group(2)) if windows_rtt else None
+        avg_ms = float(windows_rtt.group(3)) if windows_rtt else None
 
     return {
         "host": host,
@@ -1466,16 +1675,26 @@ def traceroute(
 
         ip_addr = ip_match.group(1) if ip_match else None
 
-        # Hostname: second token when it is not a bare IP or paren-wrapped.
+        # Hostname: second token on Unix, or the name before [IP] on Windows.
         hostname = None
+        if ip_addr:
+            named_match = re.search(
+                rf'([A-Za-z0-9_.-]+)\s+[\[(]{re.escape(ip_addr)}[\])]', line
+            )
+            if named_match:
+                hostname = named_match.group(1)
         if len(tokens) > 1:
             candidate = tokens[1]
             if (
-                not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', candidate)
+                hostname is None
+                and not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', candidate)
+                and not re.match(r'^[\d.]+$', candidate)
                 and not candidate.startswith('(')
+                and not candidate.startswith('<')
+                and candidate.lower() != 'ms'
             ):
                 hostname = candidate
-            elif ip_addr:
+            elif hostname is None and ip_addr:
                 hostname = ip_addr
 
         if hostname is None and ip_addr:
@@ -1536,6 +1755,11 @@ def whois_lookup(target: str) -> str:
 
 def ping_sweep(network: str, timeout: int = 1, max_threads: int = 50) -> List[Dict[str, Any]]:
     net = ipaddress.ip_network(network, strict=False)
+    if net.num_addresses > MAX_NETWORK_HOSTS + 2:
+        raise ValueError(
+            f"Network contains too many addresses ({net.num_addresses}); "
+            f"maximum is {MAX_NETWORK_HOSTS + 2}"
+        )
     hosts = [str(ip) for ip in net.hosts()]
 
     def _ping_one(ip):
@@ -1564,7 +1788,7 @@ def ping_sweep(network: str, timeout: int = 1, max_threads: int = 50) -> List[Di
 
 def arp_scan() -> List[Dict[str, Any]]:
     system = platform.system().lower()
-    entries = []
+    entries: List[Dict[str, Any]] = []
     if system == "linux":
         try:
             with open("/proc/net/arp", "r") as f:
@@ -1593,26 +1817,58 @@ def arp_scan() -> List[Dict[str, Any]]:
                 entries.append({"ip": match.group(1), "mac": "00:00:00:00:00:00", "interface": match.group(3), "state": "incomplete"})
             else:
                 entries.append({"ip": match.group(1), "mac": mac_raw, "interface": match.group(3), "state": "reachable"})
+    elif system == "windows":
+        try:
+            result = subprocess.run(
+                ["arp", "-a"], capture_output=True, text=True, timeout=10
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return entries
+        interface = "unknown"
+        header_pattern = re.compile(r"Interface:\s+([\d.]+)", re.IGNORECASE)
+        entry_pattern = re.compile(
+            r"^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+"
+            r"([0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5})\s+(\S+)"
+        )
+        for line in result.stdout.splitlines():
+            header = header_pattern.search(line)
+            if header:
+                interface = header.group(1)
+                continue
+            match = entry_pattern.match(line)
+            if match:
+                entries.append({
+                    "ip": match.group(1),
+                    "mac": match.group(2).replace("-", ":").lower(),
+                    "interface": interface,
+                    "state": match.group(3).lower(),
+                })
     return entries
 
 
 def reverse_dns_sweep(network: str, timeout: int = 2, max_threads: int = 50) -> List[Dict[str, Any]]:
     net = ipaddress.ip_network(network, strict=False)
+    if net.num_addresses > MAX_NETWORK_HOSTS + 2:
+        raise ValueError(
+            f"Network contains too many addresses ({net.num_addresses}); "
+            f"maximum is {MAX_NETWORK_HOSTS + 2}"
+        )
     hosts = [str(ip) for ip in net.hosts()]
 
     def _resolve_one(ip):
-        old = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(timeout)
         try:
             hostname = socket.gethostbyaddr(ip)[0]
         except (socket.herror, socket.gaierror, socket.timeout, OSError):
             hostname = None
-        finally:
-            socket.setdefaulttimeout(old)
         return {"ip": ip, "hostname": hostname}
 
-    with ThreadPoolExecutor(max_workers=max_threads) as pool:
-        results = list(pool.map(_resolve_one, hosts))
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
+    try:
+        with ThreadPoolExecutor(max_workers=max_threads) as pool:
+            results = list(pool.map(_resolve_one, hosts))
+    finally:
+        socket.setdefaulttimeout(old_timeout)
     return results
 
 
@@ -1630,6 +1886,8 @@ HTTP_PORTS = {80, 443, 8080}
 
 
 def banner_grab(host: str, port: int, timeout: float = 2.0) -> Optional[str]:
+    _validate_host(host)
+    _validate_port(port)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
@@ -1704,7 +1962,15 @@ def udp_port_check(host: str, ports: List[int], timeout: float = 2.0) -> List[Di
 
 def scan_network_port(network: str, port: int, timeout: float = 1.0) -> List[Dict[str, Any]]:
     _validate_port(port)
-    net = ipaddress.ip_network(network, strict=False)
+    try:
+        net = ipaddress.IPv4Network(network, strict=False)
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError) as exc:
+        raise ValueError(f"Invalid IPv4 network: '{network}' ({exc})")
+    if net.num_addresses > MAX_NETWORK_HOSTS + 2:
+        raise ValueError(
+            f"Network contains too many addresses ({net.num_addresses}); "
+            f"maximum is {MAX_NETWORK_HOSTS + 2}"
+        )
     hosts = [str(addr) for addr in net.hosts()]
     results = []
     workers = min(100, len(hosts)) if hosts else 1
@@ -1719,6 +1985,21 @@ def scan_network_port(network: str, port: int, timeout: float = 1.0) -> List[Dic
                 results.append({"ip": futures[fut], "port": port, "state": "closed", "service": TOP_PORTS.get(port, "unknown")})
     results.sort(key=lambda r: ipaddress.ip_address(r["ip"]))
     return results
+
+
+def generate_random_ports(minimum: int = 49152, maximum: int = 65535,
+                          count: int = 10) -> List[int]:
+    """Return unique, sorted random candidate ports without probing them."""
+    _validate_port(minimum)
+    _validate_port(maximum)
+    if minimum > maximum:
+        raise ValueError("Minimum port must not exceed maximum port")
+    available = maximum - minimum + 1
+    if not 1 <= count <= min(100, available):
+        raise ValueError(
+            f"Port quantity must be between 1 and {min(100, available)}"
+        )
+    return sorted(secrets.SystemRandom().sample(range(minimum, maximum + 1), count))
 
 
 # ---------------------------------------------------------------------------
@@ -1799,12 +2080,14 @@ def dns_zone_transfer(domain: str, nameserver: Optional[str] = None) -> Dict[str
 # ---------------------------------------------------------------------------
 
 def cert_check(host: str, port: int = 443, timeout: int = 5) -> Dict[str, Any]:
-    result = {"host": host, "port": port}
+    _validate_host(host)
+    _validate_port(port)
+    result: Dict[str, Any] = {"host": host, "port": port}
     try:
         ctx = ssl.create_default_context()
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-                cert = ssock.getpeercert()
+                cert = cast(Dict[str, Any], ssock.getpeercert() or {})
         subject_cn = ""
         for rdn in cert.get("subject", ()):
             for attr_type, attr_value in rdn:
@@ -1819,9 +2102,12 @@ def cert_check(host: str, port: int = 443, timeout: int = 5) -> Dict[str, Any]:
         not_after_str = cert.get("notAfter", "")
         date_fmt = "%b %d %H:%M:%S %Y %Z"
         try:
-            not_after_dt = datetime.strptime(not_after_str, date_fmt)
-            days_remaining = (not_after_dt - datetime.now(tz=None)).days
-            expired = datetime.now(tz=None) > not_after_dt
+            not_after_dt = datetime.strptime(not_after_str, date_fmt).replace(
+                tzinfo=timezone.utc
+            )
+            now_utc = datetime.now(timezone.utc)
+            days_remaining = (not_after_dt - now_utc).days
+            expired = now_utc > not_after_dt
         except ValueError:
             days_remaining = None
             expired = None
@@ -1845,10 +2131,12 @@ def cert_check(host: str, port: int = 443, timeout: int = 5) -> Dict[str, Any]:
 def http_headers(url: str, timeout: int = 5) -> Dict[str, Any]:
     sec_names = ["Strict-Transport-Security", "Content-Security-Policy", "X-Frame-Options",
                  "X-Content-Type-Options", "X-XSS-Protection", "Referrer-Policy", "Permissions-Policy"]
-    result = {"url": url}
+    result: Dict[str, Any] = {"url": url}
+    if not re.match(r'^https?://', url, re.IGNORECASE):
+        return {"url": url, "error": "URL must use http:// or https://"}
     try:
         req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", "SysAdminToolbox/3.0")
+        req.add_header("User-Agent", f"SysAdminToolbox/{__version__}")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             result["status_code"] = resp.getcode()
             result["headers"] = dict(resp.headers)
@@ -1860,7 +2148,7 @@ def http_headers(url: str, timeout: int = 5) -> Dict[str, Any]:
         result["error"] = str(e)
         return result
     hdr_lower = {k.lower(): v for k, v in result.get("headers", {}).items()}
-    sec = {}
+    sec: Dict[str, Dict[str, Any]] = {}
     for sh in sec_names:
         val = hdr_lower.get(sh.lower())
         sec[sh] = {"present": val is not None, "value": val.strip() if val else None}
@@ -1893,7 +2181,7 @@ def asn_lookup(ip: str) -> Dict[str, Any]:
 def traceroute_asn(host: str, max_hops: int = 30, timeout: int = 2) -> List[Dict[str, Any]]:
     hops = traceroute(host, max_hops=max_hops, timeout=timeout)
     hops_with_ip = [(i, h) for i, h in enumerate(hops) if h.get("ip")]
-    asn_results = {}
+    asn_results: Dict[int, Optional[Dict[str, Any]]] = {}
     if hops_with_ip:
         with ThreadPoolExecutor(max_workers=min(len(hops_with_ip), 20)) as pool:
             futures = {pool.submit(asn_lookup, h["ip"]): i for i, h in hops_with_ip}
@@ -1903,14 +2191,18 @@ def traceroute_asn(host: str, max_hops: int = 30, timeout: int = 2) -> List[Dict
                     asn_results[idx] = future.result()
                 except Exception:
                     asn_results[idx] = None
-    enriched = []
+    enriched: List[Dict[str, Any]] = []
     for i, hop in enumerate(hops):
-        entry = {"hop": hop.get("hop"), "ip": hop.get("ip"), "hostname": hop.get("hostname"),
-                 "rtt_ms": hop.get("rtt_ms"), "asn": None, "prefix": None, "country": None}
-        if i in asn_results and asn_results[i] and "error" not in asn_results[i]:
-            entry["asn"] = asn_results[i]["asn"]
-            entry["prefix"] = asn_results[i]["prefix"]
-            entry["country"] = asn_results[i]["country"]
+        entry: Dict[str, Any] = {
+            "hop": hop.get("hop"), "ip": hop.get("ip"),
+            "hostname": hop.get("hostname"), "rtt_ms": hop.get("rtt_ms"),
+            "asn": None, "prefix": None, "country": None,
+        }
+        asn_result = asn_results.get(i)
+        if asn_result and "error" not in asn_result:
+            entry["asn"] = asn_result["asn"]
+            entry["prefix"] = asn_result["prefix"]
+            entry["country"] = asn_result["country"]
         enriched.append(entry)
     return enriched
 
@@ -1942,47 +2234,58 @@ def _setup_parser():
 
     # Shared flags available in every subcommand
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--json", action="store_true", default=False, help="Output in JSON")
-    shared.add_argument("--no-color", action="store_true", default=False, dest="no_color", help="Disable colors")
+    shared.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS,
+        help="Output in JSON",
+    )
+    shared.add_argument(
+        "--no-color", action="store_true", default=argparse.SUPPRESS,
+        dest="no_color", help="Disable colors",
+    )
 
     # -- convert --
     p = sub.add_parser("convert", aliases=["conv", "c"], parents=[shared], help="Number/base conversions",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  convert d2b 42\n  convert b2d 10101010\n  convert d2h 255\n  convert iptobin 192.168.1.1")
+                        epilog="Examples:\n  convert d2b 42\n  convert b2d 10101010\n  convert d2h 255\n  convert iptobin 192.168.1.1\n  convert ipinfo 192.168.1.42/24")
     p.add_argument("op", choices=["d2b","b2d","d2h","h2d","b2h","h2b","iptobin","bintoip",
                                    "masktobin","bintomask","m2c","c2m","m2w","w2m","c2w","w2c",
-                                   "a2b","b2a"], help="Conversion operation")
+                                   "a2b","b2a","ipinfo"], help="Conversion operation")
     p.add_argument("value", nargs='+', help="Value(s) to convert")
 
     # -- subnet --
     p = sub.add_parser("subnet", aliases=["sub", "s"], parents=[shared], help="Subnet calculations",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  subnet calc 192.168.0.0/24\n  subnet adv 192.168.1.0/24 26\n  subnet vlsm 192.168.1.0/24 50 30 10\n  subnet overlap 10.0.0.0/24 10.0.0.128/25\n  subnet supernet 10.0.0.0/26 10.0.0.64/26")
-    p.add_argument("op", choices=["calc","adv","vlsm","overlap","supernet"], help="Subnet operation")
+                        epilog="Examples:\n  subnet calc 192.168.0.0/24\n  subnet adv 192.168.1.0/24 26\n  subnet vlsm 192.168.1.0/24 50 30 10\n  subnet range 192.168.1.10 192.168.1.35\n  subnet overlap 10.0.0.0/24 10.0.0.128/25\n  subnet supernet 10.0.0.0/26 10.0.0.64/26")
+    p.add_argument("op", choices=["calc","adv","vlsm","overlap","supernet","range"], help="Subnet operation")
     p.add_argument("args", nargs='+', help="Arguments")
+    p.add_argument(
+        "--limit", type=int, default=MAX_SUBNET_DETAILS,
+        help=f"Maximum subnet detail rows for 'adv' (default: {MAX_SUBNET_DETAILS})",
+    )
 
     # -- ipv6 --
     p = sub.add_parser("ipv6", aliases=["v6"], parents=[shared], help="IPv6 utilities",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  ipv6 expand ::1\n  ipv6 compress 2001:0db8::1\n  ipv6 type fe80::1\n  ipv6 subnet 2001:db8::/32")
-    p.add_argument("op", choices=["expand","compress","tobin","type","subnet"], help="IPv6 operation")
-    p.add_argument("value", help="IPv6 address or network")
+                        epilog="Examples:\n  ipv6 expand ::1\n  ipv6 compress 2001:0db8::1\n  ipv6 type fe80::1\n  ipv6 subnet 2001:db8::/32\n  ipv6 ula")
+    p.add_argument("op", choices=["expand","compress","tobin","type","subnet","ula"], help="IPv6 operation")
+    p.add_argument("value", nargs='?', default="", help="IPv6 address or network")
 
     # -- mac --
     p = sub.add_parser("mac", aliases=["m"], parents=[shared], help="MAC address utilities",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  mac info AA:BB:CC:DD:EE:FF\n  mac format aa:bb:cc:dd:ee:ff cisco")
-    p.add_argument("op", choices=["info","format","normalize","vendor"], help="MAC operation")
-    p.add_argument("value", help="MAC address")
+                        epilog="Examples:\n  mac info AA:BB:CC:DD:EE:FF\n  mac format aa:bb:cc:dd:ee:ff cisco\n  mac generate 5 colon")
+    p.add_argument("op", choices=["info","format","normalize","vendor","generate"], help="MAC operation")
+    p.add_argument("value", nargs='?', default="", help="MAC address, or quantity for 'generate'")
     p.add_argument("style", nargs='?', default="colon", help="Format style (colon/dash/cisco/bare)")
 
     # -- net --
     p = sub.add_parser("net", aliases=["n"], parents=[shared], help="Network diagnostics",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  net ping 8.8.8.8\n  net pingsweep 192.168.1.0/24\n  net portscan 192.168.1.1 22 80 443\n  net portscan-adv 192.168.1.1 --banner\n  net portscan-net 192.168.1.0/24 22\n  net traceroute-asn google.com\n  net dns-type google.com MX\n  net dns-compare google.com 8.8.8.8 1.1.1.1\n  net certcheck google.com\n  net headers https://google.com\n  net arp\n  net rdns-sweep 192.168.1.0/24")
+                        epilog="Examples:\n  net ping 8.8.8.8\n  net pingsweep 192.168.1.0/24\n  net portscan 192.168.1.1 22 80 443\n  net portscan-adv 192.168.1.1 top20 banner\n  net portscan-net 192.168.1.0/24 22\n  net traceroute-asn example.com\n  net dns-type example.com MX\n  net dns-compare example.com 8.8.8.8 1.1.1.1\n  net certcheck example.com\n  net headers https://example.com\n  net random-ports 49152 65535 10\n  net arp\n  net rdns-sweep 192.168.1.0/24")
     p.add_argument("op", choices=["ping","pingsweep","portscan","portscan-adv","portscan-udp","portscan-net",
                                    "traceroute","tracert","traceroute-asn","whois","dns","dns-type","dns-compare",
-                                   "dns-axfr","rdns","rdns-sweep","arp","certcheck","headers","banner"], help="Network operation")
+                                   "dns-axfr","rdns","rdns-sweep","arp","certcheck","headers","banner",
+                                   "random-ports"], help="Network operation")
     p.add_argument("target", nargs='?', default="", help="Target host/IP/domain (not needed for arp)")
     p.add_argument("extra", nargs='*', help="Extra args (ports for portscan)")
 
@@ -2011,41 +2314,55 @@ def _dispatch_convert(args):
     op = args.op
     val = args.value
     if op == "d2b":
-        print_binary_info(decimal_to_binary_values(int(val[0])))
+        info = decimal_to_binary_values(int(val[0]))
+        if is_json_mode():
+            output(info, label="binary")
+        else:
+            print_binary_info(info)
     elif op == "b2d":
-        print_binary_to_decimal_info(val[0])
+        info = binary_to_decimal_values(val[0])
+        if is_json_mode():
+            output(info, label="decimal")
+        else:
+            print_binary_to_decimal_info(val[0])
     elif op == "d2h":
-        print(decimal_to_hexadecimal(int(val[0])))
+        output(decimal_to_hexadecimal(int(val[0])), label="hexadecimal")
     elif op == "h2d":
-        print(hexadecimal_to_decimal(val[0]))
+        output(hexadecimal_to_decimal(val[0]), label="decimal")
     elif op == "b2h":
-        print(binary_to_hexadecimal(val[0]))
+        output(binary_to_hexadecimal(val[0]), label="hexadecimal")
     elif op == "h2b":
-        print(hexadecimal_to_binary(val[0]))
+        output(hexadecimal_to_binary(val[0]), label="binary")
     elif op == "iptobin":
-        print(ip_to_binary_full(val[0]))
+        if is_json_mode():
+            output({"address": val[0], "binary": ip_to_binary(val[0])}, label="ipv4")
+        else:
+            print(ip_to_binary_full(val[0]))
     elif op == "bintoip":
-        print(binary_to_ip(val[0]))
+        output(binary_to_ip(val[0]), label="address")
     elif op == "masktobin":
-        print(mask_to_binary(val[0]))
+        output(mask_to_binary(val[0]), label="binary_mask")
     elif op == "bintomask":
-        print(binary_to_mask(val[0]))
+        output(binary_to_mask(val[0]), label="netmask")
     elif op == "m2c":
-        print(mask_to_cidr(val[0]))
+        output(mask_to_cidr(val[0]), label="cidr")
     elif op == "c2m":
-        print(cidr_to_mask(int(val[0])))
+        output(cidr_to_mask(int(val[0])), label="netmask")
     elif op == "m2w":
-        print(mask_to_wildcard(val[0]))
+        output(mask_to_wildcard(val[0]), label="wildcard")
     elif op == "w2m":
-        print(wildcard_to_mask(val[0]))
+        output(wildcard_to_mask(val[0]), label="netmask")
     elif op == "c2w":
-        print(mask_to_wildcard(cidr_to_mask(int(val[0]))))
+        output(mask_to_wildcard(cidr_to_mask(int(val[0]))), label="wildcard")
     elif op == "w2c":
-        print(mask_to_cidr(wildcard_to_mask(val[0])))
+        output(mask_to_cidr(wildcard_to_mask(val[0])), label="cidr")
     elif op == "a2b":
-        print(address_to_binary(val))
+        output(address_to_binary(val), label="binary_address")
     elif op == "b2a":
-        print(binary_to_address(val))
+        addresses = [binary_to_ip(item) for item in val]
+        output(addresses if len(addresses) > 1 else addresses[0], label="address")
+    elif op == "ipinfo":
+        output(ipv4_info(val[0]), label="ipv4")
 
 
 def _dispatch_subnet(args):
@@ -2072,7 +2389,7 @@ def _dispatch_subnet(args):
     elif op == "adv":
         if len(a) < 2:
             raise ValueError("Usage: subnet adv IP/CIDR NEW_PREFIX")
-        details = advanced_subnet_calculator(a[0], a[1])
+        details = advanced_subnet_calculator(a[0], a[1], max_details=args.limit)
         if is_json_mode():
             output(details, label="advanced_subnet")
         else:
@@ -2080,11 +2397,24 @@ def _dispatch_subnet(args):
                 if k == 'subnets':
                     print(f"\n  subnets ({details['count_subnets']}):")
                     for i, s in enumerate(v, 1):
-                        print(f"    [{i}] {s['network']}{s['cidr']}  "
-                              f"hosts: {s['first_host']} - {s['last_host']}  "
-                              f"broadcast: {s['broadcast']}  "
-                              f"({s['usable_hosts']} usable)")
-                elif k == 'count_subnets':
+                        if 'first_host' in s:
+                            detail = (
+                                f"hosts: {s['first_host']} - {s['last_host']}  "
+                                f"broadcast: {s['broadcast']}  "
+                                f"({s['usable_hosts']} usable)"
+                            )
+                        else:
+                            detail = (
+                                f"addresses: {s['first_address']} - {s['last_address']}  "
+                                f"({s['num_addresses']} total)"
+                            )
+                        print(f"    [{i}] {s['network']}{s['cidr']}  {detail}")
+                    if details['truncated']:
+                        print(
+                            f"    ... {details['count_subnets'] - details['shown_subnets']} "
+                            "additional subnets omitted; change --limit to show more"
+                        )
+                elif k in ('count_subnets', 'shown_subnets', 'truncated'):
                     continue
                 else:
                     print(f"  {k}: {v}")
@@ -2118,20 +2448,31 @@ def _dispatch_subnet(args):
                 print(f"  Overlap  : {result['overlap_network']}")
     elif op == "supernet":
         result = supernet(a)
-        print(f"  Supernet: {result}")
+        if is_json_mode():
+            output(result, label="supernet")
+        else:
+            print(f"  Supernet: {result}")
+    elif op == "range":
+        if len(a) != 2:
+            raise ValueError("Usage: subnet range FIRST_IP LAST_IP")
+        cidrs = ipv4_range_to_cidrs(a[0], a[1])
+        output(cidrs, label="cidrs")
 
 
 def _dispatch_ipv6(args):
     op = args.op
     val = args.value
     if op == "expand":
-        print(ipv6_expand(val))
+        output(ipv6_expand(val), label="expanded")
     elif op == "compress":
-        print(ipv6_compress(val))
+        output(ipv6_compress(val), label="compressed")
     elif op == "tobin":
-        print(ipv6_to_binary(val))
+        output(ipv6_to_binary(val), label="binary")
     elif op == "type":
-        print(f"  {val}: {ipv6_type(val)}")
+        if is_json_mode():
+            output({"address": val, "type": ipv6_type(val)}, label="ipv6")
+        else:
+            print(f"  {val}: {ipv6_type(val)}")
     elif op == "subnet":
         details = ipv6_subnet_calculator(val)
         if is_json_mode():
@@ -2139,6 +2480,8 @@ def _dispatch_ipv6(args):
         else:
             for k, v in details.items():
                 print(f"  {k}: {v}")
+    elif op == "ula":
+        output(generate_ipv6_ula(), label="ula")
 
 
 def _dispatch_mac(args):
@@ -2158,11 +2501,14 @@ def _dispatch_mac(args):
             for style, v in info['all_formats'].items():
                 print(f"    {style:5s}: {v}")
     elif op == "format":
-        print(mac_format(val, args.style))
+        output(mac_format(val, args.style), label="mac")
     elif op == "normalize":
-        print(mac_normalize(val))
+        output(mac_normalize(val), label="mac")
     elif op == "vendor":
-        print(mac_vendor(val))
+        output(mac_vendor(val), label="oui")
+    elif op == "generate":
+        count = int(val) if val else 1
+        output(generate_local_macs(count, args.style), label="mac_addresses")
 
 
 def _dispatch_net(args):
@@ -2282,13 +2628,15 @@ def _dispatch_net(args):
             raise ValueError("Usage: net banner HOST PORT")
         port = int(args.extra[0])
         result = banner_grab(target, port)
-        if result:
+        if is_json_mode():
+            output({"host": target, "port": port, "banner": result}, label="banner")
+        elif result:
             print(result)
         else:
             print("  No banner received")
 
     elif op == "whois":
-        print(whois_lookup(target))
+        output(whois_lookup(target), label="whois")
 
     elif op in ("traceroute-asn",):
         hops = traceroute_asn(target)
@@ -2433,6 +2781,13 @@ def _dispatch_net(args):
             if result.get('aliases'):
                 print(f"  Aliases  : {', '.join(result['aliases'])}")
 
+    elif op == "random-ports":
+        minimum = int(target) if target else 49152
+        maximum = int(args.extra[0]) if args.extra else 65535
+        count = int(args.extra[1]) if len(args.extra) > 1 else 10
+        ports = generate_random_ports(minimum, maximum, count)
+        output(ports, label="ports")
+
 
 def _dispatch_vendor(args):
     op = args.op
@@ -2444,13 +2799,16 @@ def _dispatch_vendor(args):
         vlan_id = int(a[1])
         vlan_name = a[2] if len(a) > 2 else None
         ports = a[3:] if len(a) > 3 else None
-        print(vlan_helper(vendor, vlan_id, vlan_name, ports))
+        output(vlan_helper(vendor, vlan_id, vlan_name, ports), label="configuration")
     elif op == "acl":
         if len(a) < 6:
             raise ValueError("Usage: vendor acl VENDOR NAME ACTION PROTO SRC DST [SPORT] [DPORT]")
-        src_port = int(a[6]) if len(a) > 6 else None
-        dst_port = int(a[7]) if len(a) > 7 else None
-        print(acl_helper(a[0], a[1], a[2], a[3], a[4], a[5], src_port, dst_port))
+        src_port = int(a[6]) if len(a) > 6 and a[6] != "0" else None
+        dst_port = int(a[7]) if len(a) > 7 and a[7] != "0" else None
+        output(
+            acl_helper(a[0], a[1], a[2], a[3], a[4], a[5], src_port, dst_port),
+            label="configuration",
+        )
 
 
 def _dispatch_cheat(args):
@@ -2464,7 +2822,7 @@ def _dispatch_cheat(args):
         "nat": nat_cheatsheet,
     }
     fn = sheet_map[args.sheet]
-    print(fn(args.section))
+    output(fn(args.section), label="cheatsheet")
 
 
 DISPATCH = {
@@ -2521,7 +2879,11 @@ def _repl():
             print(f"{c.CYAN}{BANNER}{c.RESET}")
             continue
 
-        tokens = line.split()
+        try:
+            tokens = shlex.split(line)
+        except ValueError as e:
+            print(f"  {c.RED}Error: {e}{c.RESET}")
+            continue
         try:
             args = parser.parse_args(tokens)
             if args.json:
@@ -2530,13 +2892,14 @@ def _repl():
                 DISPATCH[args.command](args)
             else:
                 print(f"  {c.RED}Unknown command. Type 'help'.{c.RESET}")
-            set_json_mode(False)
         except SystemExit:
             pass
         except (ValueError, ipaddress.AddressValueError, ipaddress.NetmaskValueError) as e:
             print(f"  {c.RED}Error: {e}{c.RESET}")
         except RuntimeError as e:
             print(f"  {c.RED}Error: {e}{c.RESET}")
+        finally:
+            set_json_mode(False)
 
 
 # ---------------------------------------------------------------------------
