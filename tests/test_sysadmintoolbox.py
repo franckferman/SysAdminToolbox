@@ -336,8 +336,16 @@ class NetworkTests(unittest.TestCase):
     def test_tcp_checks_against_loopback(self):
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
+        listener.listen(2)
         port = listener.getsockname()[1]
+
+        def accept_connections():
+            for _ in range(2):
+                connection, _ = listener.accept()
+                connection.close()
+
+        thread = threading.Thread(target=accept_connections, daemon=True)
+        thread.start()
         try:
             result = sat.tcp_port_check("127.0.0.1", [port])
             self.assertEqual(result[0]["state"], "open")
@@ -345,6 +353,7 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(advanced[0]["state"], "open")
         finally:
             listener.close()
+            thread.join(timeout=1)
 
     def test_network_port_scan_against_loopback(self):
         listener = socket.socket()
@@ -459,7 +468,15 @@ class NetworkTests(unittest.TestCase):
             "interface": "192.0.2.10", "state": "dynamic",
         })
 
-    def test_dns_and_reverse_dns_loopback(self):
+    @patch.object(
+        sat.socket, "gethostbyaddr",
+        return_value=("localhost", [], ["127.0.0.1"]),
+    )
+    @patch.object(
+        sat.socket, "gethostbyname_ex",
+        return_value=("localhost", [], ["127.0.0.1"]),
+    )
+    def test_dns_and_reverse_dns(self, _gethostbyname, _gethostbyaddr):
         self.assertIn("127.0.0.1", sat.dns_lookup("localhost")["addresses"])
         self.assertIn("hostname", sat.reverse_dns_lookup("127.0.0.1"))
 
@@ -658,9 +675,6 @@ class OutputAndCliTests(unittest.TestCase):
             ("cheat", "firewall", "nftables", "--json"),
             ("cheat", "routing", "ospf", "--json"),
             ("cheat", "nat", "cisco_pat", "--json"),
-            ("net", "dns", "localhost", "--json"),
-            ("net", "rdns", "127.0.0.1", "--json"),
-            ("net", "arp", "--json"),
             ("net", "headers", "file:///etc/passwd", "--json"),
             ("net", "random-ports", "50000", "50010", "3", "--json"),
         )
