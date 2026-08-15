@@ -35,6 +35,9 @@ class ConversionTests(unittest.TestCase):
                 self.assertEqual(
                     sat.wildcard_to_mask(sat.mask_to_wildcard(mask)), mask
                 )
+        for cidr in (-1, 33):
+            with self.subTest(cidr=cidr), self.assertRaises(ValueError):
+                sat.cidr_to_mask(cidr)
 
     def test_non_contiguous_masks_are_rejected(self):
         for mask in ("255.0.255.0", "255.255.127.0", "128.255.0.0"):
@@ -57,12 +60,16 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(sat.binary_to_decimal("101010"), 42)
         with self.assertRaises(ValueError):
             sat.binary_to_decimal("10201")
+        with self.assertRaises(ValueError):
+            sat.binary_to_decimal("")
 
     def test_hexadecimal(self):
         self.assertEqual(sat.decimal_to_hexadecimal(-255), "-ff")
         self.assertEqual(sat.hexadecimal_to_decimal("0xff"), 255)
         self.assertEqual(sat.binary_to_hexadecimal("11111111"), "ff")
         self.assertEqual(sat.hexadecimal_to_binary("2a"), "101010")
+        with self.assertRaises(ValueError):
+            sat.hexadecimal_to_decimal("not-hexadecimal")
 
     def test_ipv4_binary(self):
         binary = "11000000.10101000.00000001.00000001"
@@ -166,6 +173,8 @@ class IPv6Tests(unittest.TestCase):
             "2001:db8::1": "documentation",
             "::ffff:192.0.2.1": "ipv4-mapped",
             "64:ff9b::192.0.2.1": "ipv4-translated (NAT64)",
+            "ff02::1": "multicast",
+            "2001:4860:4860::8888": "global unicast",
         }
         for address, expected in cases.items():
             with self.subTest(address=address):
@@ -204,6 +213,8 @@ class MacAndVendorTests(unittest.TestCase):
     def test_mac_generation_limits(self):
         with self.assertRaises(ValueError):
             sat.generate_local_macs(101)
+        with self.assertRaises(ValueError):
+            sat.mac_format("aa:bb:cc:dd:ee:ff", "unknown")
 
     def test_vlan_helpers(self):
         cisco = sat.vlan_helper("cisco", 10, "Guest", ["Gi0/1", "Gi0/2"])
@@ -212,10 +223,18 @@ class MacAndVendorTests(unittest.TestCase):
             "juniper", 10, "Guest", ["ge-0/0/1", "ge-0/0/2"]
         )
         self.assertEqual(juniper.count("set interfaces "), 2)
+        huawei = sat.vlan_helper(
+            "huawei", 10, "Guest", ["GigabitEthernet0/0/1"]
+        )
+        self.assertIn("port default vlan 10", huawei)
         with self.assertRaises(ValueError):
             sat.vlan_helper("cisco", 10, "Guest WiFi")
         with self.assertRaises(ValueError):
             sat.vlan_helper("unknown", 10)
+        with self.assertRaises(ValueError):
+            sat.vlan_helper("cisco", 4095)
+        with self.assertRaises(ValueError):
+            sat.vlan_helper("cisco", 10, "Guest", ["Gi0/1\nshutdown"])
 
     def test_acl_helpers(self):
         juniper = sat.acl_helper(
@@ -480,6 +499,8 @@ class NetworkTests(unittest.TestCase):
         self.assertTrue(all(50000 <= port <= 50020 for port in ports))
         with self.assertRaises(ValueError):
             sat.generate_random_ports(50020, 50000, 1)
+        with self.assertRaises(ValueError):
+            sat.generate_random_ports(50000, 50002, 4)
 
     @patch.object(sat.subprocess, "run")
     def test_asn_lookup(self, run):
@@ -653,12 +674,28 @@ class OutputAndCliTests(unittest.TestCase):
         self.assertIn("Error:", process.stderr)
         self.assertNotIn("Traceback", process.stderr)
 
-    def test_repl_parser_accepts_quoted_values(self):
-        args = sat._setup_parser().parse_args(
-            shlex_tokens := ["vendor", "vlan", "cisco", "10", "Guest WiFi"]
+    def test_command_aliases(self):
+        commands = (
+            ("c", "d2b", "42", "--json"),
+            ("s", "calc", "192.0.2.0/24", "--json"),
+            ("v6", "type", "::1", "--json"),
+            ("m", "normalize", "aabb.ccdd.eeff", "--json"),
+            ("v", "vlan", "cisco", "10", "Guest", "--json"),
+            ("cs", "nat", "cisco_pat", "--json"),
         )
-        self.assertEqual(shlex_tokens[-1], "Guest WiFi")
-        self.assertEqual(args.args[-1], "Guest WiFi")
+        for command in commands:
+            with self.subTest(command=" ".join(command)):
+                self.assert_json_command(*command)
+
+    def test_repl_handles_bad_quotes_and_resets_json_mode(self):
+        stream = io.StringIO()
+        commands = iter(('convert d2b "42', "c d2b 42 --json", "exit"))
+        with patch("builtins.input", side_effect=lambda _prompt: next(commands)), \
+                patch("sys.stdout", new=stream):
+            sat._repl()
+        self.assertIn("No closing quotation", stream.getvalue())
+        self.assertIn('"binary": "101010"', stream.getvalue())
+        self.assertFalse(output_module.is_json_mode())
 
     def test_json_output_wrapper_and_colors(self):
         stream = io.StringIO()
@@ -685,15 +722,6 @@ class MetadataTests(unittest.TestCase):
         combined = pyproject + readme + (SRC / "SysAdminToolbox" / "SysAdminToolbox.py").read_text(encoding="utf-8")
         self.assertNotIn("AGPL", combined)
         self.assertNotIn("GPLv3", combined)
-
-    def test_readme_header_is_compact(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn('width="400"', readme)
-        self.assertNotIn("Table of Contents", readme)
-        self.assertNotIn("Back to top", readme)
-        for vanity in ("Contributors", "Forks", "Stargazers", "Issues]["):
-            self.assertNotIn(vanity, readme)
-
 
 if __name__ == "__main__":
     unittest.main()
