@@ -8,10 +8,6 @@
 
 Zero runtime Python dependencies. Standard library only.
 
-[![Tests](https://github.com/franckferman/SysAdminToolbox/actions/workflows/tests.yml/badge.svg?branch=stable)](https://github.com/franckferman/SysAdminToolbox/actions/workflows/tests.yml)
-[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 </div>
 
 ## About
@@ -189,6 +185,8 @@ The standard-library test suite covers calculations, validation, every determini
 python3 -m compileall -q src
 python3 -m unittest discover -s tests -v
 ```
+
+CI installs the package and runs the suite on Python 3.9 through 3.14 on Linux, with additional Python 3.14 jobs on Windows and macOS.
 
 ## Contributing
 

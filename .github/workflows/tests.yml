@@ -1,6 +1,7 @@
-name: Tests
+name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [stable, dev]
   pull_request:
@@ -9,23 +10,37 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package
-        run: python -m pip install .
-      - name: Smoke-test installed command
-        run: SysAdminToolbox --version
-      - name: Compile sources
-        run: python -m compileall -q src
+        run: python -m pip install --disable-pip-version-check .
+      - name: Verify installed package
+        run: python -c "import json, subprocess; data = json.loads(subprocess.check_output(['SysAdminToolbox', '--json', 'subnet', 'calc', '10.0.0.0/8'], text=True)); assert data['network_address'] == '10.0.0.0'"
+      - name: Check package dependencies
+        run: python -m pip check
+      - name: Compile sources and tests
+        run: python -m compileall -q src tests
       - name: Run test suite
-        run: python -m unittest discover -s tests -v
+        run: python -W error -m unittest discover -s tests -v
