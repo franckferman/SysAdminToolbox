@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.2.0
+Version  : 3.3.0
 License  : MIT
 
 Repository:
@@ -18,6 +18,8 @@ License details:
 import argparse
 import ipaddress
 import itertools
+import json
+import os
 import platform
 import re
 import secrets
@@ -33,17 +35,129 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 
-try:
-    from SysAdminToolbox.colors import colored_subnet_output, colors_enabled
-    from SysAdminToolbox.output import output, set_json_mode, is_json_mode
-except ImportError:
-    from colors import colored_subnet_output, colors_enabled  # type: ignore[import-not-found,no-redef]
-    from output import output, set_json_mode, is_json_mode  # type: ignore[import-not-found,no-redef]
-
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
+
+
+# ---------------------------------------------------------------------------
+#  Terminal and output helpers
+# ---------------------------------------------------------------------------
+
+_json_output = False
+
+
+def set_json_mode(enabled: bool) -> None:
+    global _json_output
+    _json_output = enabled
+
+
+def is_json_mode() -> bool:
+    return _json_output
+
+
+def _stdout_is_tty() -> bool:
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+def _no_color_requested() -> bool:
+    return "--no-color" in sys.argv or os.environ.get("NO_COLOR") is not None
+
+
+def colors_enabled() -> bool:
+    return _stdout_is_tty() and not _no_color_requested()
+
+
+class Colors:
+    RED: str
+    GREEN: str
+    YELLOW: str
+    BLUE: str
+    MAGENTA: str
+    CYAN: str
+    BOLD: str
+    DIM: str
+    RESET: str
+
+    _CODES = {
+        "RED": "\033[31m",
+        "GREEN": "\033[32m",
+        "YELLOW": "\033[33m",
+        "BLUE": "\033[34m",
+        "MAGENTA": "\033[35m",
+        "CYAN": "\033[36m",
+        "BOLD": "\033[1m",
+        "DIM": "\033[2m",
+        "RESET": "\033[0m",
+    }
+
+    def __init__(self, force: Optional[bool] = None):
+        enabled = colors_enabled() if force is None else force
+        for name, code in self._CODES.items():
+            setattr(self, name, code if enabled else "")
+
+
+def _format_human(data: Any, indent: int = 0) -> str:
+    prefix = "  " * indent
+    lines = []
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                lines.append(f"{prefix}{key}:")
+                lines.append(_format_human(value, indent + 1))
+            else:
+                lines.append(f"{prefix}{key}: {value}")
+    elif isinstance(data, (list, tuple)):
+        for index, item in enumerate(data):
+            if isinstance(item, (dict, list, tuple)):
+                lines.append(f"{prefix}[{index}]")
+                lines.append(_format_human(item, indent + 1))
+            else:
+                lines.append(f"{prefix}- {item}")
+    else:
+        lines.append(f"{prefix}{data}")
+
+    return "\n".join(lines)
+
+
+def output(data: Any, label: str = "result", file=None) -> None:
+    destination = file or sys.stdout
+
+    if _json_output:
+        if not isinstance(data, (dict, list)):
+            data = {label: data}
+        print(json.dumps(data, indent=2, default=str), file=destination)
+        return
+
+    if isinstance(data, (dict, list)):
+        print(f"{label.replace('_', ' ').title()}:", file=destination)
+        print(_format_human(data, indent=1), file=destination)
+    else:
+        print(data, file=destination)
+
+
+def colored_subnet_output(details: dict) -> str:
+    colors = Colors()
+    field_colors = {
+        "network_address": colors.CYAN,
+        "broadcast": colors.RED,
+        "first_host": colors.GREEN,
+        "last_host": colors.GREEN,
+        "cidr": colors.YELLOW,
+        "netmask": colors.YELLOW,
+        "wildcard": colors.YELLOW,
+        "is_private": colors.BOLD,
+        "is_global": colors.BOLD,
+    }
+    lines = []
+    for key, value in details.items():
+        color = field_colors.get(key, "")
+        reset = colors.RESET if color else ""
+        label = key.replace("_", " ").title()
+        lines.append(f"  {label}: {color}{value}{reset}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -2841,10 +2955,6 @@ DISPATCH = {
 # ---------------------------------------------------------------------------
 
 def _repl():
-    try:
-        from SysAdminToolbox.colors import Colors
-    except ImportError:
-        from colors import Colors
     c = Colors()
     print(f"{c.CYAN}{BANNER}{c.RESET}\n")
     print(f"  {c.DIM}Interactive mode. Type a command or 'help'. Ctrl+C to exit.{c.RESET}\n")
@@ -2918,10 +3028,6 @@ def main():
         return
 
     if len(sys.argv) == 1:
-        try:
-            from SysAdminToolbox.colors import Colors
-        except ImportError:
-            from colors import Colors
         c = Colors()
         print(f"{c.CYAN}{BANNER}{c.RESET}\n")
         parser.print_help()

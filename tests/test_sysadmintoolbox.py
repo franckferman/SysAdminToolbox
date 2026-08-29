@@ -1,9 +1,11 @@
 import io
 import ipaddress
 import json
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -17,7 +19,6 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from SysAdminToolbox import SysAdminToolbox as sat  # noqa: E402
-from SysAdminToolbox import colors, output as output_module  # noqa: E402
 
 
 class ConversionTests(unittest.TestCase):
@@ -623,6 +624,20 @@ class OutputAndCliTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.run_cli(command, "--help").returncode, 0)
 
+    def test_source_file_runs_without_the_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            standalone = Path(directory) / "SysAdminToolbox.py"
+            shutil.copy2(self.CLI[1], standalone)
+            process = subprocess.run(
+                [sys.executable, str(standalone), "--version"],
+                cwd=directory,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn(sat.__version__, process.stdout)
+
     def test_json_flag_before_and_after_subcommand(self):
         before = self.assert_json_command("--json", "subnet", "calc", "10.0.0.0/8")
         after = self.assert_json_command("subnet", "calc", "10.0.0.0/8", "--json")
@@ -709,18 +724,18 @@ class OutputAndCliTests(unittest.TestCase):
             sat._repl()
         self.assertIn("No closing quotation", stream.getvalue())
         self.assertIn('"binary": "101010"', stream.getvalue())
-        self.assertFalse(output_module.is_json_mode())
+        self.assertFalse(sat.is_json_mode())
 
-    def test_json_output_wrapper_and_colors(self):
+    def test_json_output_and_colors(self):
         stream = io.StringIO()
-        output_module.set_json_mode(True)
+        sat.set_json_mode(True)
         try:
-            output_module.output("ok", label="status", file=stream)
+            sat.output("ok", label="status", file=stream)
         finally:
-            output_module.set_json_mode(False)
+            sat.set_json_mode(False)
         self.assertEqual(json.loads(stream.getvalue()), {"status": "ok"})
-        self.assertIn("\x1b[31m", colors.Colors(force=True).RED)
-        self.assertEqual(colors.Colors(force=False).RED, "")
+        self.assertIn("\x1b[31m", sat.Colors(force=True).RED)
+        self.assertEqual(sat.Colors(force=False).RED, "")
 
 
 class MetadataTests(unittest.TestCase):
@@ -728,14 +743,18 @@ class MetadataTests(unittest.TestCase):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
-        init_text = (SRC / "SysAdminToolbox" / "__init__.py").read_text(encoding="utf-8")
+        source_text = (SRC / "SysAdminToolbox" / "SysAdminToolbox.py").read_text(encoding="utf-8")
         self.assertIn(f'version = "{sat.__version__}"', pyproject)
-        self.assertIn(f'__version__ = "{sat.__version__}"', init_text)
+        self.assertIn(f'__version__ = "{sat.__version__}"', source_text)
         self.assertIn("MIT License", license_text)
         self.assertIn("MIT License", readme)
-        combined = pyproject + readme + (SRC / "SysAdminToolbox" / "SysAdminToolbox.py").read_text(encoding="utf-8")
+        combined = pyproject + readme + source_text
         self.assertNotIn("AGPL", combined)
         self.assertNotIn("GPLv3", combined)
+        source_files = sorted(
+            path.name for path in (SRC / "SysAdminToolbox").glob("*.py")
+        )
+        self.assertEqual(source_files, ["SysAdminToolbox.py"])
 
 if __name__ == "__main__":
     unittest.main()
