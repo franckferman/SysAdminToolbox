@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.3.0
+Version  : 3.3.1
 License  : MIT
 
 Repository:
@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "3.3.0"
+__version__ = "3.3.1"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -98,6 +98,41 @@ class Colors:
             setattr(self, name, code if enabled else "")
 
 
+_DISPLAY_INITIALISMS = {
+    "asn": "ASN",
+    "cidr": "CIDR",
+    "dns": "DNS",
+    "http": "HTTP",
+    "id": "ID",
+    "ip": "IP",
+    "ipv4": "IPv4",
+    "ipv6": "IPv6",
+    "mac": "MAC",
+    "ms": "ms",
+    "oui": "OUI",
+    "rtt": "RTT",
+    "tls": "TLS",
+    "url": "URL",
+}
+
+_DISPLAY_NAMES = {
+    "ipv4_mapped_ipv6": "IPv4-mapped IPv6",
+    "num_addresses": "Number of Addresses",
+}
+
+
+def _display_name(name: Any) -> str:
+    """Return a readable label while preserving common network initialisms."""
+    normalized = str(name).replace("-", "_")
+    if normalized.lower() in _DISPLAY_NAMES:
+        return _DISPLAY_NAMES[normalized.lower()]
+    words = normalized.split("_")
+    return " ".join(
+        _DISPLAY_INITIALISMS.get(word.lower(), word.capitalize())
+        for word in words
+    )
+
+
 def _format_human(data: Any, indent: int = 0) -> str:
     prefix = "  " * indent
     lines = []
@@ -105,10 +140,10 @@ def _format_human(data: Any, indent: int = 0) -> str:
     if isinstance(data, dict):
         for key, value in data.items():
             if isinstance(value, (dict, list)):
-                lines.append(f"{prefix}{key}:")
+                lines.append(f"{prefix}{_display_name(key)}:")
                 lines.append(_format_human(value, indent + 1))
             else:
-                lines.append(f"{prefix}{key}: {value}")
+                lines.append(f"{prefix}{_display_name(key)}: {value}")
     elif isinstance(data, (list, tuple)):
         for index, item in enumerate(data):
             if isinstance(item, (dict, list, tuple)):
@@ -132,7 +167,7 @@ def output(data: Any, label: str = "result", file=None) -> None:
         return
 
     if isinstance(data, (dict, list)):
-        print(f"{label.replace('_', ' ').title()}:", file=destination)
+        print(f"{_display_name(label)}:", file=destination)
         print(_format_human(data, indent=1), file=destination)
     else:
         print(data, file=destination)
@@ -312,14 +347,10 @@ def ip_to_binary(ip: str) -> str:
 
 
 def ip_to_binary_full(ip: str) -> str:
-    _validate_ip(ip)
-    octets = ip.split('.')
-    unsigned = '.'.join(bin(int(o))[2:] for o in octets)
-    signed = '.'.join(format(int(o), '08b') for o in octets)
+    binary = ip_to_binary(ip)
     return (
-        f"Original value: {ip}\n"
-        f"Unsigned Binary: {unsigned}\n"
-        f"Binary signed 2's complement (8 digits): {signed}"
+        f"IPv4 address: {ip}\n"
+        f"Binary (32-bit): {binary}"
     )
 
 
@@ -964,31 +995,31 @@ VLAN_CHEATSHEET = {
     "trunk": (
         "Trunk Port Configuration:\n"
         "  Switch(config-if)# switchport mode trunk\n"
-        "  Switch(config-if)# switchport trunk encapsulation dot1q\n"
-        "  Switch(config-if)# switchport trunk allowed vlan 10,100-200\n"
-        "  Switch(config-if)# switchport trunk native vlan 10"
+        "  Switch(config-if)# switchport nonegotiate\n"
+        "  Switch(config-if)# switchport trunk allowed vlan 10,100-200,999\n"
+        "  Switch(config-if)# switchport trunk native vlan 999"
     ),
     "svi": (
         "SVI Configuration:\n"
-        "  Switch(config)# interface vlan100\n"
-        "  Switch(config-if)# ip address 192.168.100.1 255.255.255.0"
+        "  Switch(config)# interface vlan 100\n"
+        "  Switch(config-if)# ip address 192.168.100.1 255.255.255.0\n"
+        "  Switch(config-if)# no shutdown"
     ),
     "vtp": (
-        "VLAN Trunking Protocol (VTP):\n"
-        "  Switch(config)# vtp mode server\n"
-        "  Switch(config)# vtp domain LASVEGAS\n"
-        "  Switch(config)# vtp password Presl3y\n"
-        "  Switch(config)# vtp version 2\n"
-        "  Switch(config)# vtp pruning"
+        "VLAN Trunking Protocol (VTP, when intentionally deployed):\n"
+        "  Switch(config)# vtp version 3\n"
+        "  Switch(config)# vtp domain EXAMPLE\n"
+        "  Switch(config)# vtp mode transparent\n"
+        "  Verify the configuration revision before joining an existing domain."
     ),
     "troubleshooting": (
         "Troubleshooting:\n"
         "  show vlan\n"
-        "  show interface status\n"
-        "  show interface switchport\n"
-        "  show interface trunk\n"
+        "  show interfaces status\n"
+        "  show interfaces switchport\n"
+        "  show interfaces trunk\n"
         "  show vtp status\n"
-        "  show vtp password"
+        "  show vtp counters"
     ),
     "terminology": (
         "Terminology:\n"
@@ -1006,8 +1037,8 @@ VLAN_CHEATSHEET = {
     ),
     "trunktypes": (
         "Trunk Types:\n"
-        "  802.1Q: Header 4B | Standard IEEE | Max 4094 VLANs | cmd: dot1q\n"
-        "  ISL:    Header 26B + Trailer 4B | Cisco | Max 1000 VLANs | cmd: isl"
+        "  802.1Q: 4-byte tag | IEEE standard | VLAN IDs 1-4094\n"
+        "  ISL:    Cisco proprietary | legacy and obsolete | historical reference only"
     ),
     "vlannumbers": (
         "VLAN Numbers:\n"
