@@ -12,7 +12,7 @@ Zero runtime Python dependencies. Standard library only.
 
 ## About
 
-SysAdminToolbox provides network calculations, diagnostics, and configuration generation through a Python command-line interface.
+SysAdminToolbox provides network calculations, diagnostics, and configuration generation through a single-file Python command-line interface.
 
 - **Conversions** - Binary, decimal, hexadecimal, IPv4, masks, CIDR, and wildcards.
 - **Address planning** - IPv4/IPv6 subnetting, VLSM, ranges, overlap checks, and supernets.
@@ -25,7 +25,14 @@ SysAdminToolbox provides network calculations, diagnostics, and configuration ge
 
 Requires Python 3.9 or newer.
 
-Install directly from GitHub without cloning the repository:
+### Direct download
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/src/SysAdminToolbox/SysAdminToolbox.py
+python3 SysAdminToolbox.py --version
+```
+
+### pip
 
 ```bash
 python3 -m venv .venv
@@ -34,15 +41,12 @@ python -m pip install https://github.com/franckferman/SysAdminToolbox/archive/re
 SysAdminToolbox --version
 ```
 
-Clone the repository to inspect or modify the source:
+### Source
 
 ```bash
 git clone https://github.com/franckferman/SysAdminToolbox.git
 cd SysAdminToolbox
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install .
-SysAdminToolbox --version
+python3 src/SysAdminToolbox/SysAdminToolbox.py --version
 ```
 
 The calculations and socket-based checks use only the Python standard library. These optional diagnostics call operating-system tools when available:
