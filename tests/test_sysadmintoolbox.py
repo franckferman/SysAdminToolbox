@@ -75,6 +75,11 @@ class ConversionTests(unittest.TestCase):
     def test_ipv4_binary(self):
         binary = "11000000.10101000.00000001.00000001"
         self.assertEqual(sat.ip_to_binary("192.168.1.1"), binary)
+        self.assertEqual(
+            sat.ip_to_binary_full("192.168.1.1"),
+            "IPv4 address: 192.168.1.1\n"
+            f"Binary (32-bit): {binary}",
+        )
         self.assertEqual(sat.binary_to_ip(binary), "192.168.1.1")
         self.assertEqual(sat.binary_to_ip(binary.replace(".", "")), "192.168.1.1")
         with self.assertRaises(ValueError):
@@ -268,6 +273,19 @@ class MacAndVendorTests(unittest.TestCase):
                 self.assertTrue(function())
                 with self.assertRaises(ValueError):
                     function("not-a-section")
+
+    def test_vlan_cheatsheet_uses_current_safe_defaults(self):
+        trunk = sat.vlan_cheatsheet("trunk")
+        vtp = sat.vlan_cheatsheet("vtp")
+        troubleshooting = sat.vlan_cheatsheet("troubleshooting")
+
+        self.assertIn("switchport nonegotiate", trunk)
+        self.assertNotIn("encapsulation dot1q", trunk)
+        self.assertIn("vtp version 3", vtp)
+        self.assertIn("vtp mode transparent", vtp)
+        self.assertNotIn("vtp password", vtp.lower())
+        self.assertIn("show interfaces trunk", troubleshooting)
+        self.assertNotIn("show vtp password", troubleshooting)
 
 
 class NetworkTests(unittest.TestCase):
@@ -736,6 +754,20 @@ class OutputAndCliTests(unittest.TestCase):
         self.assertEqual(json.loads(stream.getvalue()), {"status": "ok"})
         self.assertIn("\x1b[31m", sat.Colors(force=True).RED)
         self.assertEqual(sat.Colors(force=False).RED, "")
+
+    def test_human_output_preserves_network_initialisms(self):
+        stream = io.StringIO()
+        sat.output(
+            {"ipv4_mapped_ipv6": "::ffff:192.0.2.1", "num_addresses": 256},
+            label="ipv4",
+            file=stream,
+        )
+        self.assertEqual(
+            stream.getvalue(),
+            "IPv4:\n"
+            "  IPv4-mapped IPv6: ::ffff:192.0.2.1\n"
+            "  Number of Addresses: 256\n",
+        )
 
 
 class MetadataTests(unittest.TestCase):
