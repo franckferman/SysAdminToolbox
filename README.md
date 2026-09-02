@@ -174,6 +174,8 @@ SysAdminToolbox cheat nat cisco_pat
 
 Generated configuration is a starting point. Review interface names, platform syntax, policy order, and change-control requirements before applying it.
 
+Cheatsheets show current guidance by default. Use `SysAdminToolbox cheat vlan --legacy` to add clearly marked maintenance references for older Cisco environments, including ISL, platform-specific trunk encapsulation, and VTP v1/v2. This flag only changes reference output; configuration generators continue to use current defaults.
+
 ### JSON and terminal output
 
 `--json` works before or after the subcommand and returns valid JSON for every operation. Colors disable automatically when output is redirected; `--no-color` and the `NO_COLOR` environment variable disable them explicitly.

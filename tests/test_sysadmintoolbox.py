@@ -275,10 +275,13 @@ class MacAndVendorTests(unittest.TestCase):
                     function("not-a-section")
 
     def test_vlan_cheatsheet_uses_current_safe_defaults(self):
+        default = sat.vlan_cheatsheet()
         trunk = sat.vlan_cheatsheet("trunk")
         vtp = sat.vlan_cheatsheet("vtp")
         troubleshooting = sat.vlan_cheatsheet("troubleshooting")
 
+        self.assertNotIn("ISL", default)
+        self.assertNotIn("encapsulation dot1q", default)
         self.assertIn("switchport nonegotiate", trunk)
         self.assertNotIn("encapsulation dot1q", trunk)
         self.assertIn("vtp version 3", vtp)
@@ -286,6 +289,17 @@ class MacAndVendorTests(unittest.TestCase):
         self.assertNotIn("vtp password", vtp.lower())
         self.assertIn("show interfaces trunk", troubleshooting)
         self.assertNotIn("show vtp password", troubleshooting)
+
+    def test_vlan_legacy_cheatsheet_is_explicitly_opt_in(self):
+        with self.assertRaises(ValueError):
+            sat.vlan_cheatsheet("legacy_trunking")
+
+        legacy = sat.vlan_cheatsheet(include_legacy=True)
+        self.assertIn("Legacy Cisco Trunking", legacy)
+        self.assertIn("switchport trunk encapsulation dot1q", legacy)
+        self.assertIn("switchport trunk encapsulation isl", legacy)
+        self.assertIn("VTP Versions 1 and 2", legacy)
+        self.assertIn("maintenance and migration only", legacy)
 
 
 class NetworkTests(unittest.TestCase):
@@ -702,6 +716,7 @@ class OutputAndCliTests(unittest.TestCase):
             ("vendor", "vlan", "cisco", "10", "Guest", "Gi0/1", "--json"),
             ("vendor", "acl", "juniper", "BLOCK", "deny", "tcp", "10.0.0.0/8", "0.0.0.0/0", "0", "443", "--json"),
             ("cheat", "vlan", "creation", "--json"),
+            ("cheat", "vlan", "--legacy", "--json"),
             ("cheat", "acl", "creation", "--json"),
             ("cheat", "huawei", "creation", "--json"),
             ("cheat", "mikrotik", "creation", "--json"),
@@ -733,6 +748,18 @@ class OutputAndCliTests(unittest.TestCase):
         for command in commands:
             with self.subTest(command=" ".join(command)):
                 self.assert_json_command(*command)
+
+    def test_legacy_cheatsheet_flag(self):
+        current = self.run_cli("cs", "vlan")
+        legacy = self.run_cli("cs", "vlan", "legacy_trunking", "--legacy")
+        unsupported = self.run_cli("cs", "firewall", "--legacy")
+
+        self.assertEqual(current.returncode, 0, current.stderr)
+        self.assertNotIn("ISL", current.stdout)
+        self.assertEqual(legacy.returncode, 0, legacy.stderr)
+        self.assertIn("maintenance and migration only", legacy.stdout)
+        self.assertEqual(unsupported.returncode, 1)
+        self.assertIn("currently available only", unsupported.stderr)
 
     def test_repl_handles_bad_quotes_and_resets_json_mode(self):
         stream = io.StringIO()
