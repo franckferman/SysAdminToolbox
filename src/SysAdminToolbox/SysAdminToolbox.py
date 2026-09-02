@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.3.1
+Version  : 3.3.2
 License  : MIT
 
 Repository:
@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "3.3.1"
+__version__ = "3.3.2"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -1037,8 +1037,7 @@ VLAN_CHEATSHEET = {
     ),
     "trunktypes": (
         "Trunk Types:\n"
-        "  802.1Q: 4-byte tag | IEEE standard | VLAN IDs 1-4094\n"
-        "  ISL:    Cisco proprietary | legacy and obsolete | historical reference only"
+        "  802.1Q: 4-byte tag | IEEE standard | VLAN IDs 1-4094"
     ),
     "vlannumbers": (
         "VLAN Numbers:\n"
@@ -1047,6 +1046,25 @@ VLAN_CHEATSHEET = {
         "  1002-1005: Legacy (FDDI/Token Ring)\n"
         "  1006-4094: Extended\n"
         "  4095:      Reserved"
+    ),
+}
+
+VLAN_LEGACY_CHEATSHEET = {
+    "legacy_trunking": (
+        "Legacy Cisco Trunking (maintenance and migration only):\n"
+        "  These commands apply only to hardware supporting both ISL and 802.1Q.\n"
+        "  Switch(config-if)# switchport trunk encapsulation dot1q\n"
+        "  Switch(config-if)# switchport trunk encapsulation isl\n"
+        "  ISL is Cisco-proprietary; use IEEE 802.1Q for new deployments."
+    ),
+    "legacy_vtp": (
+        "VTP Versions 1 and 2 (maintenance and migration only):\n"
+        "  Switch(config)# vtp version 2\n"
+        "  Switch(config)# vtp domain EXAMPLE\n"
+        "  Switch(config)# vtp mode server\n"
+        "  Before joining an existing domain, verify and reset the configuration\n"
+        "  revision with the procedure documented for the target platform. A device\n"
+        "  with a higher revision can replace the domain VLAN database."
     ),
 }
 
@@ -1352,8 +1370,14 @@ def _cheatsheet_lookup(sheets: dict, section: Optional[str] = None) -> str:
     return '\n\n'.join(sheets.values())
 
 
-def vlan_cheatsheet(section: Optional[str] = None) -> str:
-    return _cheatsheet_lookup(VLAN_CHEATSHEET, section)
+def vlan_cheatsheet(
+    section: Optional[str] = None,
+    include_legacy: bool = False,
+) -> str:
+    sheets = dict(VLAN_CHEATSHEET)
+    if include_legacy:
+        sheets.update(VLAN_LEGACY_CHEATSHEET)
+    return _cheatsheet_lookup(sheets, section)
 
 def acl_cheatsheet(section: Optional[str] = None) -> str:
     return _cheatsheet_lookup(ACL_CHEATSHEET, section)
@@ -2444,9 +2468,14 @@ def _setup_parser():
     # -- cheat --
     p = sub.add_parser("cheat", aliases=["cs"], parents=[shared], help="Cheatsheets",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  cheat vlan trunk\n  cheat acl\n  cheat firewall iptables\n  cheat routing ospf\n  cheat nat cisco_pat\n  cheat huawei\n  cheat mikrotik")
+                        epilog="Examples:\n  cheat vlan trunk\n  cheat vlan --legacy\n  cheat vlan legacy_trunking --legacy\n  cheat acl\n  cheat firewall iptables\n  cheat routing ospf\n  cheat nat cisco_pat\n  cheat huawei\n  cheat mikrotik")
     p.add_argument("sheet", choices=["vlan","acl","huawei","mikrotik","firewall","routing","nat"], help="Cheatsheet topic")
     p.add_argument("section", nargs='?', default=None, help="Specific section (optional)")
+    p.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Include explicitly marked compatibility references for older systems",
+    )
 
     return parser
 
@@ -2966,8 +2995,16 @@ def _dispatch_cheat(args):
         "routing": routing_cheatsheet,
         "nat": nat_cheatsheet,
     }
+    if args.legacy and args.sheet != "vlan":
+        raise ValueError(
+            "--legacy is currently available only for the VLAN cheatsheet"
+        )
     fn = sheet_map[args.sheet]
-    output(fn(args.section), label="cheatsheet")
+    if args.sheet == "vlan":
+        content = vlan_cheatsheet(args.section, include_legacy=args.legacy)
+    else:
+        content = fn(args.section)
+    output(content, label="cheatsheet")
 
 
 DISPATCH = {
