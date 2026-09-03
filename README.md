@@ -140,7 +140,18 @@ The audit exits with status 1 when it finds an issue, which makes it suitable fo
 
 ### Host and application diagnostics
 
-The top-level `doctor` command explains likely causes without changing the host. It never starts or reloads a service, edits configuration, changes ownership or permissions, deletes data, or remounts a filesystem.
+The top-level `doctor` command follows an explicit diagnostic path without changing the host. Every result contains the ordered methodology, the status of each step, skipped checks and their dependencies, observations, findings, and ranked cause candidates. A candidate remains a hypothesis until the evidence proves it. The command never starts or reloads a service, edits configuration, changes ownership or permissions, deletes data, or remounts a filesystem.
+
+The workflow follows the evidence and hypothesis cycle described in Google's [Effective Troubleshooting](https://sre.google/sre-book/effective-troubleshooting/). Network checks use Cisco's documented [bottom-up OSI method](https://www.cisco.com/cisco/web/docs/iam/unified/ipt611/System_Troubleshooting_Methodology.html), while application doctors replace a rigid OSI walk with the dependency order of the application being inspected.
+
+Provide the observation and recent change when they are known. This keeps the snapshot tied to the reported problem instead of treating every unusual metric as causal:
+
+```bash
+SysAdminToolbox doctor system \
+  --symptom "API latency increased at 14:20 UTC" \
+  --expected "health endpoint below 200 ms" \
+  --recent-change "application release at 14:10 UTC"
+```
 
 ```bash
 # Overall host state: CPU/load, memory, pressure stalls, disk capacity,
@@ -156,11 +167,14 @@ SysAdminToolbox doctor disk /var --du
 # Generic service state and exit information
 SysAdminToolbox doctor service postgresql
 
-# Local network state plus an explicit DNS/TCP probe
+# Bottom-up interface, addressing, route, DNS, TCP, and optional HTTP/TLS path
 SysAdminToolbox doctor network database.internal --port 5432
+SysAdminToolbox doctor network https://app.example.com/health
 ```
 
-`doctor nginx` correlates the Nginx binary and build paths, `nginx -t` syntax validation, the expanded active configuration from `nginx -T`, service state, configured listeners, document roots, certificate paths, worker traversal permissions, filesystem capacity and inodes, SELinux/AppArmor signals, and an optional HTTP HEAD virtual-host probe.
+`doctor network` proceeds bottom-up: interface/link evidence, local addressing and routing prerequisites, name resolution, route selection for the resolved address, transport, then TLS/HTTP when the target is a URL. A failed DNS step explicitly skips target-route and transport checks instead of producing misleading secondary failures.
+
+`doctor nginx` follows an application-specific dependency path: host capacity, service manager plus running-process correlation, bounded service logs, binary discovery, `nginx -t`, expanded active configuration from `nginx -T`, configured logs, IP and Unix listeners, a direct virtual-host probe, and the relevant content/security-policy path. It branches its recommendations for TLS failures, connection failures, redirects, 401, 403, 404, and upstream-oriented 502/503/504 responses.
 
 ```bash
 SysAdminToolbox doctor nginx
@@ -168,9 +182,19 @@ SysAdminToolbox doctor nginx --config /etc/nginx/nginx.conf
 SysAdminToolbox doctor nginx \
   --url http://127.0.0.1/health \
   --host-header app.example.com
+
+# Connect locally while selecting and validating the HTTPS virtual host by SNI
+SysAdminToolbox doctor nginx \
+  --url https://127.0.0.1/health \
+  --host-header app.example.com \
+  --sni app.example.com
 ```
 
-Its findings distinguish common failure classes such as invalid includes, missing roots or certificates, 403 policy and path traversal errors, 404 virtual-host or deployment mismatches, unavailable upstreams, bind collisions, timeouts, full filesystems, inode exhaustion, file-descriptor exhaustion, and TLS file-loading errors. The expanded configuration is parsed in memory and is not printed, because it may contain credentials.
+When `--sni` is omitted for HTTPS, the SNI name follows `--host-header`, then the URL hostname. The socket always connects directly to the URL address: environment proxies are ignored. Redirects are recorded but not followed unless `--follow-redirects` is explicit. `--insecure` disables certificate verification only for that probe and makes the overall result a warning.
+
+Its findings distinguish common failure classes such as invalid includes, missing roots or certificates, 403 policy and path traversal errors, 404 virtual-host or deployment mismatches, unavailable upstreams, bind collisions, timeouts, full filesystems, inode exhaustion, file-descriptor exhaustion, and TLS file-loading errors. The expanded configuration is parsed in memory and is not printed, because it may contain credentials. Nginx officially defines `-t` as syntax and referenced-file validation and `-T` as the same validation plus a configuration dump; see the [command-line reference](https://nginx.org/en/docs/switches.html). This also discovers distribution-specific includes such as `/etc/nginx/sites-enabled/*` when they are part of the active configuration; the tool does not hard-code that Debian-specific layout.
+
+`.htaccess` is an [Apache HTTP Server per-directory mechanism](https://httpd.apache.org/docs/current/en/howto/htaccess.html) and is intentionally not inspected by `doctor nginx`.
 
 Log contents are never read by default. Select them explicitly and keep the sample narrow:
 
@@ -183,6 +207,8 @@ SysAdminToolbox doctor nginx --logs all --lines 100
 ```
 
 Selected logs are capped at 500 lines per source and redact authorization headers, cookies, common secret parameters, and JWT-shaped values. Automatic service-journal collection uses `journalctl`; other service managers report that the application-specific log path must be selected manually. `--raw-logs` disables redaction and should be used only when the output remains in an approved location. Some checks need elevated read access, but the tool does not require or invoke `sudo` itself. Nginx validation opens referenced files, and an optional HTTP probe normally creates a regular access-log entry.
+
+Log selectors are scope-specific: `doctor system` accepts `system`, `doctor service` accepts `service`, and `doctor nginx` accepts `service`, `error`, `access`, or `all`. Log content remains opt-in because a general diagnostic should not expose application data by default.
 
 ### Doctor and batch input
 
