@@ -181,6 +181,18 @@ SysAdminToolbox doctor firewall 80,443
 
 `doctor firewall` discovers the host controls available on the current platform and correlates only the requested inbound TCP ports. On Linux it understands UFW application profiles, active firewalld zones and services, nftables input-hook chains, and IPv4/IPv6 iptables INPUT rules. It also supports Windows Firewall profiles and rules through PowerShell and PF on macOS and BSD. The result distinguishes an observed allow, an observed deny, a default-deny policy without a direct allow, an inactive firewall, insufficient privileges, and an indeterminate ruleset. It never invokes `sudo` or changes policy.
 
+Some platforms restrict ruleset inspection to root or an account with equivalent capabilities. SysAdminToolbox uses the privileges of the current process: run it normally from an existing root session, or let the operator explicitly elevate only the diagnostic that needs it. For example:
+
+```bash
+sudo SysAdminToolbox doctor firewall 80,443
+sudo python3 ./SysAdminToolbox.py doctor firewall 80,443
+
+# When installed in a user-owned virtual environment, use its absolute path
+sudo /absolute/path/to/.venv/bin/SysAdminToolbox doctor firewall 80,443
+```
+
+`sudo -E` is unnecessary. Without sufficient access, the command returns `firewall_inspection_limited` and keeps the port verdict `indeterminate`. Even UID 0 may remain restricted inside a container without the required network capability or when the relevant rules belong to another network namespace. Log contents remain opt-in when an Nginx or service diagnostic is elevated.
+
 These are local-host observations, not a proof of end-to-end reachability. Cloud security groups, provider firewalls, routers, load balancers, container or network namespaces, source restrictions, interface selection, rule order, jumps, sets, and state tracking can change the effective result. The tool therefore reports cautious evidence such as `potentially_blocked` instead of claiming that a port is certainly open or closed. UFW is treated as a frontend and may appear beside its nftables or iptables backend. See the official [Ubuntu UFW guide](https://documentation.ubuntu.com/server/how-to/security/firewalls/index.html), [firewalld documentation](https://firewalld.org/documentation/man-pages/firewall-cmd.html), [nftables ruleset operations](https://wiki.nftables.org/wiki-nftables/index.php/Operations_at_ruleset_level), and [iptables manual](https://man7.org/linux/man-pages/man8/iptables.8.html).
 
 `doctor nginx` follows an application-specific dependency path: host capacity, service manager plus running-process correlation, bounded service logs, binary discovery, `nginx -t`, expanded active configuration from `nginx -T`, configured logs, IP and Unix listeners, host-firewall correlation for configured TCP ports, a direct virtual-host probe, and the relevant content/security-policy path. It branches its recommendations for TLS failures, connection failures, redirects, 401, 403, 404, and upstream-oriented 502/503/504 responses.
