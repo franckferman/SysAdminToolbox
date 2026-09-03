@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.3.1
+Version  : 3.4.0
 License  : MIT
 
 Repository:
@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "3.3.1"
+__version__ = "3.4.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096

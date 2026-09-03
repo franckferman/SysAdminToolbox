@@ -20,6 +20,8 @@ SysAdminToolbox provides network calculations, diagnostics, and configuration ge
 - **Configuration** - VLAN and ACL generators for Cisco, Juniper, and Huawei.
 - **Reference** - VLAN, ACL, firewall, routing, and NAT cheatsheets.
 - **Automation** - Consistent JSON output, no-color mode, and an interactive REPL.
+- **AI assistant (optional)** - Ask questions, explain output, or suggest a command through a local Ollama or a cloud provider (Anthropic, OpenAI, DeepSeek, Kimi). Standard library only, opt-in, off by default.
+- **Web UI (optional)** - Serve the safe command groups and cheatsheets in a local browser.
 
 ## Installation
 
@@ -89,6 +91,8 @@ Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the built
 | `net` (`n`) | Ping and sweeps, TCP/UDP checks, traceroute, DNS, WHOIS, TLS, HTTP headers, ARP, random ports |
 | `vendor` (`v`) | `vlan`, `acl` |
 | `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
+| `ai` | `ask`, `explain`, `suggest` - local Ollama or a cloud provider, opt-in |
+| `web` | Local browser UI for the safe command groups and cheatsheets |
 
 ### Conversions and address planning
 
@@ -173,6 +177,27 @@ SysAdminToolbox cheat nat cisco_pat
 ```
 
 Generated configuration is a starting point. Review interface names, platform syntax, policy order, and change-control requirements before applying it.
+
+### AI assistant (optional)
+
+The `ai` command is opt-in and adds no dependencies - it uses the standard library and only reaches the network when you run it. It prefers a local Ollama (private) and otherwise falls back to the first configured cloud provider.
+
+```bash
+SysAdminToolbox ai ask "what is a /29 useful for"
+SysAdminToolbox ai suggest "split 10.0.0.0/24 into 4 subnets"
+SysAdminToolbox net certcheck example.com --json | SysAdminToolbox ai explain
+```
+
+Choose a provider with `--provider` (`auto` by default): `ollama`, `anthropic`, `openai`, `deepseek`, or `kimi`, optionally `provider:model`. API keys are read from the environment only and are never stored - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`; local Ollama uses `OLLAMA_HOST`. Before any cloud call the tool prints the provider, model, and a prompt digest and asks for confirmation; pass `--yes` to skip it, or keep everything private with a local Ollama.
+
+### Web UI (optional)
+
+The `web` command serves a small local interface for the safe command groups and cheatsheets. It binds `127.0.0.1` by default, runs each request through the same commands in an isolated subprocess behind a fixed whitelist, and never exposes the network diagnostics or the `ai` command.
+
+```bash
+SysAdminToolbox web
+SysAdminToolbox web --host 127.0.0.1 --port 8787
+```
 
 ### JSON and terminal output
 
