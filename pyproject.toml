@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SysAdminToolbox"
-version = "3.3.2"
+version = "4.0.0"
 description = "Dependency-free network administration CLI for calculations, diagnostics, and configuration helpers."
 authors = [{ name = "Franck Ferman", email = "contact@franckferman.fr" }]
 license = "MIT"
@@ -27,7 +27,8 @@ classifiers = [
 readme = { file = "README.md", content-type = "text/markdown" }
 keywords = [
     "sysadmin", "networking", "cli", "subnet", "cidr", "ipv4", "ipv6",
-    "vlsm", "vlan", "dns", "network-diagnostics", "network-automation"
+    "vlsm", "vlan", "dns", "ipam", "tls", "oui", "network-diagnostics",
+    "network-automation"
 ]
 requires-python = ">=3.9"
 

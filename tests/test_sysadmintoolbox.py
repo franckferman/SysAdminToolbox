@@ -100,6 +100,27 @@ class ConversionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sat.ipv4_range_to_cidrs("192.168.1.35", "192.168.1.10")
 
+    def test_iana_special_purpose_classification(self):
+        cases = {
+            "100.64.0.1": ("shared", False, "current"),
+            "192.0.0.9": ("global", True, "current"),
+            "192.88.99.1": ("special", None, "legacy"),
+            "203.0.113.8": ("documentation", False, "current"),
+            "2001:1::3": ("global", True, "current"),
+            "2001:10::1": ("special", False, "legacy"),
+            "2001:db8::1": ("documentation", False, "current"),
+            "2001:4860:4860::8888": ("global", True, "current"),
+        }
+        for address, expected in cases.items():
+            with self.subTest(address=address):
+                result = sat.classify_ip(address)
+                self.assertEqual(
+                    (result["scope"], result["globally_reachable"], result["status"]),
+                    expected,
+                )
+        with self.assertRaises(ValueError):
+            sat.classify_ip("not-an-address")
+
 
 class SubnetTests(unittest.TestCase):
     def test_subnet_calculator_common_prefix(self):
@@ -164,6 +185,51 @@ class SubnetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sat.check_overlap("10.0.0.0/24", "2001:db8::/32")
 
+    def test_contains_exclude_and_nth_address(self):
+        self.assertTrue(sat.subnet_contains("10.0.0.0/8", "10.1.2.3")["contains"])
+        self.assertFalse(sat.subnet_contains("10.0.0.0/24", "10.0.1.0/24")["contains"])
+        self.assertEqual(
+            sat.subnet_exclude("192.0.2.0/29", "192.0.2.0/30"),
+            ["192.0.2.4/30"],
+        )
+        self.assertEqual(sat.subnet_nth("192.0.2.0/24", 255)["role"], "broadcast")
+        huge = sat.subnet_nth("2001:db8::/32", 2 ** 64)
+        self.assertEqual(huge["address"], "2001:db8:0:1::")
+        with self.assertRaises(ValueError):
+            sat.subnet_nth("192.0.2.0/30", 4)
+
+    def test_subnet_inventory_loading_and_audit(self):
+        inventory = {
+            "parent": "10.0.0.0/24",
+            "allocations": [
+                {"name": "users", "network": "10.0.0.0/26", "requested_hosts": 62},
+                {"name": "duplicate", "network": "10.0.0.0/26"},
+                {"name": "overlap", "network": "10.0.0.32/27"},
+                {"name": "too-small", "network": "10.0.0.64/30", "requested_hosts": 3},
+                {"name": "outside", "network": "10.0.1.0/24"},
+                {"name": "bad", "network": "nope"},
+            ],
+        }
+        result = sat.subnet_audit(inventory["allocations"], inventory["parent"])
+        self.assertEqual(result["status"], "issues")
+        self.assertEqual(len(result["duplicates"]), 1)
+        self.assertTrue(result["overlaps"])
+        self.assertEqual(result["capacity_issues"][0]["name"], "too-small")
+        self.assertEqual(result["outside_parent"][0]["name"], "outside")
+        self.assertEqual(result["invalid"][0]["name"], "bad")
+        self.assertTrue(result["free_networks"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            json_path = Path(directory) / "inventory.json"
+            csv_path = Path(directory) / "inventory.csv"
+            text_path = Path(directory) / "inventory.txt"
+            json_path.write_text(json.dumps(inventory), encoding="utf-8")
+            csv_path.write_text("name,network,requested_hosts\nweb,192.0.2.0/28,10\n", encoding="utf-8")
+            text_path.write_text("# allocations\n192.0.2.0/28\n192.0.2.16/28\n", encoding="utf-8")
+            self.assertEqual(sat.load_subnet_inventory(str(json_path))["parent"], "10.0.0.0/24")
+            self.assertEqual(sat.load_subnet_inventory(str(csv_path))["allocations"][0]["name"], "web")
+            self.assertEqual(len(sat.load_subnet_inventory(str(text_path))["allocations"]), 2)
+
 
 class IPv6Tests(unittest.TestCase):
     def test_expand_compress_and_binary(self):
@@ -222,13 +288,55 @@ class MacAndVendorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sat.mac_format("aa:bb:cc:dd:ee:ff", "unknown")
 
+    def test_local_ieee_oui_database(self):
+        registry = (
+            "Registry,Assignment,Organization Name,Organization Address\n"
+            "MA-L,001122,Example Networks,Paris FR\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "oui.csv"
+            database.write_text(registry, encoding="utf-8")
+            result = sat.mac_vendor_lookup("00:11:22:33:44:55", str(database))
+            self.assertTrue(result["found"])
+            self.assertEqual(result["organization"], "Example Networks")
+            local = sat.mac_vendor_lookup("02:11:22:33:44:55", str(database))
+            self.assertEqual(local["reason"], "locally administered address")
+
+    def test_oui_database_update_validates_and_writes_atomically(self):
+        payload = (
+            b"Registry,Assignment,Organization Name,Organization Address\n"
+            b"MA-L,AABBCC,Example Vendor,Example Address\n"
+        )
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return payload
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(sat.urllib.request, "urlopen", return_value=Response()):
+            destination = Path(directory) / "oui.csv"
+            result = sat.update_oui_database(str(destination))
+            self.assertEqual(result["entries"], 1)
+            self.assertEqual(destination.read_bytes(), payload)
+        with self.assertRaises(ValueError):
+            sat.update_oui_database(url="http://example.com/oui.csv")
+        with self.assertRaises(ValueError):
+            sat.update_oui_database(timeout=0)
+
     def test_vlan_helpers(self):
         cisco = sat.vlan_helper("cisco", 10, "Guest", ["Gi0/1", "Gi0/2"])
         self.assertIn("interface range Gi0/1,Gi0/2", cisco)
         juniper = sat.vlan_helper(
             "juniper", 10, "Guest", ["ge-0/0/1", "ge-0/0/2"]
         )
-        self.assertEqual(juniper.count("set interfaces "), 2)
+        self.assertEqual(juniper.count("interface-mode access"), 2)
+        self.assertEqual(juniper.count("vlan members Guest"), 2)
         huawei = sat.vlan_helper(
             "huawei", 10, "Guest", ["GigabitEthernet0/0/1"]
         )
@@ -241,6 +349,24 @@ class MacAndVendorTests(unittest.TestCase):
             sat.vlan_helper("cisco", 4095)
         with self.assertRaises(ValueError):
             sat.vlan_helper("cisco", 10, "Guest", ["Gi0/1\nshutdown"])
+
+    def test_platform_aware_vlan_generation(self):
+        current = sat.vlan_helper(
+            "cisco", 10, "Guest", ["Gi0/1"], mode="trunk",
+            allowed_vlans="10,20-22", native_vlan=99,
+        )
+        self.assertNotIn("trunk encapsulation", current)
+        self.assertIn("switchport trunk allowed vlan 10,20-22", current)
+        self.assertIn("switchport trunk native vlan 99", current)
+        with self.assertRaises(ValueError):
+            sat.vlan_helper("cisco", 10, platform_name="cisco-ios", mode="trunk")
+        legacy = sat.vlan_helper(
+            "cisco", 10, platform_name="cisco-ios", software_version="15.2",
+            mode="trunk", allow_legacy=True,
+        )
+        self.assertIn("switchport trunk encapsulation dot1q", legacy)
+        profiles = sat.platform_profiles(include_legacy=False)
+        self.assertTrue(all(profile["status"] == "current" for profile in profiles))
 
     def test_acl_helpers(self):
         juniper = sat.acl_helper(
@@ -300,6 +426,16 @@ class MacAndVendorTests(unittest.TestCase):
         self.assertIn("switchport trunk encapsulation isl", legacy)
         self.assertIn("VTP Versions 1 and 2", legacy)
         self.assertIn("maintenance and migration only", legacy)
+
+    def test_structured_cheatsheet_metadata(self):
+        current = sat.render_cheatsheet("vlan", "trunk", show_sources=True)
+        self.assertIn("status: current", current)
+        self.assertIn("source: https://", current)
+        legacy = sat.render_cheatsheet(
+            "vlan", "legacy_trunking", include_legacy=True, show_sources=True
+        )
+        self.assertIn("status: legacy", legacy)
+        self.assertIn("replacement:", legacy)
 
 
 class NetworkTests(unittest.TestCase):
@@ -456,6 +592,17 @@ class NetworkTests(unittest.TestCase):
         result = sat.dns_lookup_type("example.com", "BOGUS")
         self.assertIn("error", result)
 
+    @patch.object(
+        sat.socket,
+        "getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", 0))],
+    )
+    @patch.object(sat.subprocess, "run", side_effect=FileNotFoundError)
+    def test_dns_address_lookup_has_stdlib_fallback(self, _run, _getaddrinfo):
+        result = sat.dns_lookup_type("example.com", "A")
+        self.assertEqual(result["records"], ["example.com. 0 IN A 192.0.2.1"])
+        self.assertEqual(result["fallback"], "socket.getaddrinfo")
+
     @patch.object(sat, "dns_lookup_type")
     def test_dns_compare(self, lookup):
         lookup.side_effect = [
@@ -594,8 +741,17 @@ class NetworkTests(unittest.TestCase):
                 return False
 
         class FakeTlsSocket:
-            def getpeercert(self):
-                return certificate
+            def getpeercert(self, binary_form=False):
+                return b"certificate" if binary_form else certificate
+
+            def version(self):
+                return "TLSv1.3"
+
+            def cipher(self):
+                return ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+
+            def selected_alpn_protocol(self):
+                return "h2"
 
         fake_context = SimpleNamespace(
             wrap_socket=lambda _sock, server_hostname: ContextManager(FakeTlsSocket())
@@ -606,6 +762,11 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(result["subject"], "example.com")
         self.assertEqual(result["issuer"], "Example CA")
         self.assertFalse(result["expired"])
+        self.assertFalse(result["not_yet_valid"])
+        self.assertTrue(result["hostname_verified"])
+        self.assertEqual(result["tls_version"], "TLSv1.3")
+        self.assertEqual(result["cipher_bits"], 256)
+        self.assertEqual(len(result["sha256_fingerprint"]), 64)
 
     def test_http_headers_and_scheme_guard(self):
         class Handler(BaseHTTPRequestHandler):
@@ -630,6 +791,114 @@ class NetworkTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=1)
         self.assertIn("error", sat.http_headers("file:///etc/passwd"))
+
+    def test_wait_and_batch_orchestration(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def accept_once():
+            connection, _ = listener.accept()
+            connection.close()
+
+        thread = threading.Thread(target=accept_once, daemon=True)
+        thread.start()
+        try:
+            ready = sat.wait_for_service("127.0.0.1", port, timeout=1, interval=0.01)
+            self.assertEqual(ready["status"], "ready")
+        finally:
+            listener.close()
+            thread.join(timeout=1)
+
+        def worker(value):
+            if value == "bad":
+                raise ValueError("broken target")
+            return {"target": value, "status": "ok"}
+
+        batch = sat.run_batch(["second", "bad", "first"], worker, workers=3)
+        self.assertEqual([row["target"] for row in batch], ["second", "bad", "first"])
+        self.assertEqual(batch[1]["status"], "failed")
+
+    @patch.object(sat, "http_headers", return_value={"status_code": 200})
+    @patch.object(sat, "cert_check", return_value={"expired": False, "days_remaining": 90})
+    @patch.object(sat, "tcp_probe", return_value={"status": "ok"})
+    @patch.object(sat, "resolve_all", return_value={"status": "ok", "addresses": [{"address": "192.0.2.1"}]})
+    def test_doctor_pipeline(self, _resolve, _tcp, _cert, _headers):
+        result = sat.doctor_target("https://example.com/health", timeout=1)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(set(result["checks"]), {"dns", "tcp", "tls", "http"})
+
+    @patch.object(sat, "dnssec_status", return_value={"status": "validated"})
+    @patch.object(sat, "dns_lookup_type")
+    def test_dns_health_includes_delegation_and_mail(self, lookup, _dnssec):
+        def answer(domain, record_type="A", server=None, timeout=5):
+            values = {
+                ("example.com", "A"): ["example.com. 300 IN A 192.0.2.1"],
+                ("example.com", "NS"): ["example.com. 300 IN NS ns1.example.com."],
+                ("example.com", "SOA"): ["example.com. 300 IN SOA ns1.example.com. hostmaster.example.com. 1 2 3 4 5"],
+                ("example.com", "TXT"): ["example.com. 300 IN TXT \"v=spf1 -all\""],
+                ("_dmarc.example.com", "TXT"): ["_dmarc.example.com. 300 IN TXT \"v=DMARC1; p=reject\""],
+                ("mail._domainkey.example.com", "TXT"): ["mail._domainkey.example.com. 300 IN TXT \"v=DKIM1; p=abc\""],
+            }
+            return {
+                "domain": domain,
+                "type": record_type,
+                "server": server or "default",
+                "records": values.get((domain, record_type), []),
+            }
+
+        lookup.side_effect = answer
+        result = sat.dns_health("example.com", dkim_selector="mail")
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["delegation"]["consistent"])
+        self.assertTrue(result["mail"]["spf"])
+        self.assertTrue(result["mail"]["dmarc"])
+        self.assertTrue(result["mail"]["dkim"])
+        self.assertEqual(result["dnssec"]["status"], "validated")
+
+    @patch.object(sat, "_resolver_addresses", return_value=["192.0.2.53"])
+    @patch.object(sat.platform, "platform", return_value="Test Linux")
+    @patch.object(sat.platform, "system", return_value="Linux")
+    @patch.object(sat, "_optional_command")
+    def test_local_network_inventory_linux(self, command, _system, _platform, _resolvers):
+        def response(argv, timeout=10):
+            if argv[2] == "address":
+                payload = [{
+                    "ifname": "eth0", "operstate": "UP", "mtu": 1500,
+                    "address": "00:11:22:33:44:55",
+                    "addr_info": [{"family": "inet", "local": "192.0.2.10", "prefixlen": 24, "scope": "global"}],
+                }]
+            else:
+                payload = [{"dst": "default", "gateway": "192.0.2.1", "dev": "eth0", "prefsrc": "192.0.2.10"}]
+            return {"ok": True, "error": None, "stdout": json.dumps(payload)}
+
+        command.side_effect = response
+        result = sat.local_network_inventory()
+        self.assertEqual(result["interfaces"][0]["name"], "eth0")
+        self.assertEqual(result["routes"][0]["gateway"], "192.0.2.1")
+        self.assertEqual(result["dns_servers"], ["192.0.2.53"])
+
+    @patch.object(sat.platform, "platform", return_value="Test Windows")
+    @patch.object(sat.platform, "system", return_value="Windows")
+    @patch.object(sat, "_optional_command")
+    def test_local_network_inventory_windows(self, command, _system, _platform):
+        command.return_value = {
+            "ok": True,
+            "error": None,
+            "stdout": (
+                "Ethernet adapter Ethernet:\n"
+                "   Physical Address. . . . . . . . . : 00-11-22-33-44-55\n"
+                "   IPv4 Address. . . . . . . . . . . : 192.0.2.10(Preferred)\n"
+                "   Default Gateway . . . . . . . . . : 192.0.2.1\n"
+                "   DNS Servers . . . . . . . . . . . : 192.0.2.53\n"
+            ),
+        }
+        result = sat.local_network_inventory()
+        self.assertEqual(result["interfaces"][0]["mac"], "00:11:22:33:44:55")
+        self.assertEqual(result["interfaces"][0]["addresses"][0]["address"], "192.0.2.10")
+        self.assertEqual(result["default_routes"][0]["gateway"], "192.0.2.1")
+        self.assertEqual(result["dns_servers"], ["192.0.2.53"])
 
 
 class OutputAndCliTests(unittest.TestCase):
@@ -696,12 +965,16 @@ class OutputAndCliTests(unittest.TestCase):
             ("convert", "a2b", "192.168.1.1", "--json"),
             ("convert", "b2a", "11000000101010000000000100000001", "--json"),
             ("convert", "ipinfo", "192.168.1.42/24", "--json"),
+            ("convert", "ipclass", "100.64.0.1", "--json"),
             ("subnet", "calc", "192.168.1.0/24", "--json"),
             ("subnet", "adv", "192.168.1.0/24", "26", "--json"),
             ("subnet", "vlsm", "192.168.1.0/24", "50", "30", "10", "--json"),
             ("subnet", "overlap", "10.0.0.0/24", "10.0.0.128/25", "--json"),
             ("subnet", "supernet", "10.0.0.0/25", "10.0.0.128/25", "--json"),
             ("subnet", "range", "192.168.1.10", "192.168.1.35", "--json"),
+            ("subnet", "contains", "10.0.0.0/8", "10.1.2.3", "--json"),
+            ("subnet", "exclude", "192.0.2.0/29", "192.0.2.0/30", "--json"),
+            ("subnet", "nth", "2001:db8::/32", "4294967296", "--json"),
             ("ipv6", "expand", "::1", "--json"),
             ("ipv6", "compress", "2001:0db8::1", "--json"),
             ("ipv6", "tobin", "::1", "--json"),
@@ -715,6 +988,7 @@ class OutputAndCliTests(unittest.TestCase):
             ("mac", "generate", "2", "colon", "--json"),
             ("vendor", "vlan", "cisco", "10", "Guest", "Gi0/1", "--json"),
             ("vendor", "acl", "juniper", "BLOCK", "deny", "tcp", "10.0.0.0/8", "0.0.0.0/0", "0", "443", "--json"),
+            ("vendor", "profiles", "--json"),
             ("cheat", "vlan", "creation", "--json"),
             ("cheat", "vlan", "--legacy", "--json"),
             ("cheat", "acl", "creation", "--json"),
@@ -781,6 +1055,40 @@ class OutputAndCliTests(unittest.TestCase):
         self.assertEqual(json.loads(stream.getvalue()), {"status": "ok"})
         self.assertIn("\x1b[31m", sat.Colors(force=True).RED)
         self.assertEqual(sat.Colors(force=False).RED, "")
+
+    def test_batch_output_formats(self):
+        records = [
+            {"target": "one", "status": "ok", "detail": {"port": 443}},
+            {"target": "two", "status": "failed", "detail": None},
+        ]
+        ndjson = io.StringIO()
+        sat.emit_records(records, "ndjson", file=ndjson)
+        self.assertEqual(len(ndjson.getvalue().splitlines()), 2)
+        self.assertEqual(json.loads(ndjson.getvalue().splitlines()[0])["target"], "one")
+
+        csv_output = io.StringIO()
+        sat.emit_records(records, "csv", file=csv_output)
+        lines = csv_output.getvalue().splitlines()
+        self.assertIn("detail", lines[0])
+        self.assertEqual(len(lines), 3)
+
+    def test_subnet_audit_cli_exit_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clean = Path(directory) / "clean.json"
+            broken = Path(directory) / "broken.json"
+            clean.write_text(
+                json.dumps({"parent": "192.0.2.0/24", "allocations": ["192.0.2.0/25"]}),
+                encoding="utf-8",
+            )
+            broken.write_text(
+                json.dumps({"parent": "192.0.2.0/24", "allocations": ["198.51.100.0/24"]}),
+                encoding="utf-8",
+            )
+            clean_process = self.run_cli("subnet", "audit", str(clean), "--json")
+            broken_process = self.run_cli("subnet", "audit", str(broken), "--json")
+        self.assertEqual(clean_process.returncode, 0, clean_process.stderr)
+        self.assertEqual(broken_process.returncode, 1, broken_process.stderr)
+        self.assertEqual(json.loads(broken_process.stdout)["status"], "issues")
 
     def test_human_output_preserves_network_initialisms(self):
         stream = io.StringIO()
