@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 4.1.0
+Version  : 4.2.0
 License  : MIT
 
 Repository:
@@ -18,6 +18,7 @@ License details:
 import argparse
 import csv
 import hashlib
+import http.client
 import ipaddress
 import itertools
 import json
@@ -43,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "4.1.0"
+__version__ = "4.2.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -3024,6 +3025,7 @@ def _finding(
     summary: str,
     evidence: Optional[str] = None,
     recommendation: Optional[str] = None,
+    phase: Optional[str] = None,
 ) -> Dict[str, Any]:
     item: Dict[str, Any] = {
         "code": code,
@@ -3034,7 +3036,103 @@ def _finding(
         item["evidence"] = evidence
     if recommendation:
         item["recommendation"] = recommendation
+    if phase:
+        item["phase"] = phase
     return item
+
+
+def _diagnostic_step(
+    step_id: str,
+    title: str,
+    status: str,
+    summary: str,
+    layer: Optional[str] = None,
+    depends_on: Optional[List[str]] = None,
+    evidence: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Build one explicit, machine-readable troubleshooting step."""
+    if status not in {"passed", "warning", "failed", "skipped", "not_applicable"}:
+        raise ValueError(f"Invalid diagnostic step status: {status}")
+    step: Dict[str, Any] = {
+        "id": step_id,
+        "title": title,
+        "status": status,
+        "summary": summary,
+    }
+    if layer:
+        step["layer"] = layer
+    if depends_on:
+        step["depends_on"] = depends_on
+    if evidence is not None and evidence != "" and evidence != []:
+        step["evidence"] = evidence
+    return step
+
+
+def _methodology(name: str, strategy: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Describe the ordered diagnostic method separately from raw observations."""
+    return {
+        "name": name,
+        "version": 1,
+        "strategy": strategy,
+        "steps": steps,
+    }
+
+
+def _rank_cause_candidates(findings: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
+    """Rank observations as hypotheses without claiming unproven root cause."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    ordered = sorted(
+        enumerate(_deduplicate_findings(findings)),
+        key=lambda item: (severity_rank.get(str(item[1].get("severity")), 3), item[0]),
+    )
+    result = []
+    for _index, finding in ordered[:limit]:
+        severity = finding.get("severity")
+        confidence = (
+            "high" if severity == "critical" and finding.get("evidence") else
+            "medium" if severity in {"critical", "warning"} else "low"
+        )
+        candidate = {
+            "code": finding.get("code"),
+            "priority": severity,
+            "hypothesis": finding.get("summary"),
+            "confidence": confidence,
+        }
+        for key in ("phase", "evidence", "recommendation"):
+            if finding.get(key):
+                candidate[key] = finding[key]
+        result.append(candidate)
+    return result
+
+
+def _validate_diagnostic_context(value: Optional[str], label: str) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 500 or any(ord(char) < 32 and char not in "\t" for char in cleaned):
+        raise ValueError(f"Invalid {label}; use at most 500 printable characters")
+    return cleaned
+
+
+def _diagnostic_context(
+    target: str,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "target": target,
+        "symptom": _validate_diagnostic_context(symptom, "symptom"),
+        "expected": _validate_diagnostic_context(expected, "expected behavior"),
+        "recent_change": _validate_diagnostic_context(recent_change, "recent change"),
+    }
+
+
+def _has_operator_context(context: Dict[str, Any]) -> bool:
+    """Return whether the operator supplied useful diagnostic context."""
+    return any(context.get(key) for key in ("symptom", "expected", "recent_change"))
 
 
 def _deduplicate_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -3180,17 +3278,40 @@ def disk_diagnostic(
     timeout: float = 30.0,
     warning_percent: float = 85.0,
     critical_percent: float = 95.0,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Inspect capacity, inodes, mount state, and optional top-level usage."""
     if not 0 < warning_percent < critical_percent <= 100:
         raise ValueError("Disk thresholds must satisfy 0 < warning < critical <= 100")
     candidate = Path(path).expanduser()
+    context = _diagnostic_context(str(candidate), symptom, expected, recent_change)
     if not candidate.exists():
         finding = _finding(
             "path_missing", "critical", f"Path does not exist: {candidate}",
             recommendation="Check the mount point or path supplied to the diagnostic.",
+            phase="target",
         )
-        return {"path": str(candidate), "status": "failed", "findings": [finding]}
+        steps = [
+            _diagnostic_step(
+                "context", "Define the capacity symptom", "passed" if _has_operator_context(context) else "warning",
+                "Operator context was recorded." if _has_operator_context(context) else "No symptom, expectation, or recent change was supplied.",
+            ),
+            _diagnostic_step(
+                "target", "Resolve target path", "failed", "The requested path does not exist.",
+                depends_on=["context"], evidence=str(candidate),
+            ),
+        ]
+        return {
+            "path": str(candidate), "status": "failed", "read_only": True,
+            "context": context,
+            "methodology": _methodology(
+                "filesystem-capacity", "Resolve the target, then check capacity, inodes, mount state, and bounded growth.", steps,
+            ),
+            "cause_candidates": _rank_cause_candidates([finding]),
+            "findings": [finding],
+        }
     measured = candidate if candidate.is_dir() else candidate.parent
     usage = shutil.disk_usage(measured)
     used_percent = round((usage.used / usage.total) * 100, 2) if usage.total else 0.0
@@ -3216,12 +3337,14 @@ def disk_diagnostic(
                 f"{metric}_critical", "critical",
                 f"{metric.capitalize()} usage is critically high ({percent}%).",
                 recommendation="Free space or inodes, rotate logs, and identify growth before restarting services.",
+                phase="capacity" if metric == "disk" else "inodes",
             ))
         elif percent >= warning_percent:
             findings.append(_finding(
                 f"{metric}_warning", "warning",
                 f"{metric.capitalize()} usage is high ({percent}%).",
                 recommendation="Review growth and available capacity before the filesystem becomes full.",
+                phase="capacity" if metric == "disk" else "inodes",
             ))
     mount = _mount_details(measured)
     if mount and mount.get("read_only"):
@@ -3229,6 +3352,7 @@ def disk_diagnostic(
             "filesystem_read_only", "critical",
             f"Filesystem mounted at {mount['mountpoint']} is read-only.",
             recommendation="Inspect kernel and storage errors before attempting a remount.",
+            phase="mount",
         ))
     largest = []
     du_error = None
@@ -3248,12 +3372,55 @@ def disk_diagnostic(
                 "du_unavailable", "warning", "Top-level usage could not be collected.",
                 evidence=du_error,
                 recommendation="Run the same diagnostic with sufficient read permissions or inspect the path manually.",
+                phase="growth",
             ))
     findings = _deduplicate_findings(findings)
+    capacity_findings = [item for item in findings if item.get("phase") == "capacity"]
+    inode_findings = [item for item in findings if item.get("phase") == "inodes"]
+    mount_findings = [item for item in findings if item.get("phase") == "mount"]
+    growth_findings = [item for item in findings if item.get("phase") == "growth"]
+    steps = [
+        _diagnostic_step(
+            "context", "Define the capacity symptom", "passed" if _has_operator_context(context) else "warning",
+            "Operator context was recorded." if _has_operator_context(context) else "No symptom, expectation, or recent change was supplied.",
+        ),
+        _diagnostic_step(
+            "target", "Resolve target path", "passed", f"Resolved target path: {measured}", depends_on=["context"],
+        ),
+        _diagnostic_step(
+            "capacity", "Check filesystem capacity",
+            "failed" if any(item["severity"] == "critical" for item in capacity_findings) else "warning" if capacity_findings else "passed",
+            f"Filesystem usage is {used_percent}%.", depends_on=["target"],
+        ),
+        _diagnostic_step(
+            "inodes", "Check inode capacity",
+            "failed" if any(item["severity"] == "critical" for item in inode_findings) else "warning" if inode_findings else "passed",
+            "Inode accounting is unavailable on this platform." if inode_used_percent is None else f"Inode usage is {inode_used_percent}%.",
+            depends_on=["target"],
+        ),
+        _diagnostic_step(
+            "mount", "Check mount state",
+            "failed" if mount_findings else "passed" if mount else "not_applicable",
+            "The filesystem is mounted read-only." if mount_findings else "The mount is writable." if mount else "Mount metadata is unavailable.",
+            depends_on=["target"],
+        ),
+        _diagnostic_step(
+            "growth", "Inspect top-level growth",
+            "warning" if growth_findings else "passed" if include_du else "skipped",
+            "A bounded top-level usage scan was collected." if include_du and not growth_findings else
+            "The usage scan failed." if growth_findings else "Enable --du when a capacity problem needs attribution.",
+            depends_on=["capacity"],
+        ),
+    ]
     return {
         "path": str(candidate),
         "measured_path": str(measured),
         "status": _diagnostic_status(findings),
+        "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "filesystem-capacity", "Resolve the target, then check capacity, inodes, mount state, and bounded growth.", steps,
+        ),
         "capacity": {
             "total_bytes": usage.total,
             "used_bytes": usage.used,
@@ -3269,6 +3436,7 @@ def disk_diagnostic(
         "writable_by_current_user": os.access(measured, os.W_OK),
         "largest_entries": largest,
         "du_error": du_error,
+        "cause_candidates": _rank_cause_candidates(findings),
         "findings": findings,
     }
 
@@ -3309,15 +3477,21 @@ def service_diagnostic(
     since: str = "1 hour ago",
     raw_logs: bool = False,
     timeout: float = 10.0,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Inspect a service without starting, stopping, or reloading it."""
     _validate_config_name(name.removesuffix(".service"), "service name", max_length=128)
     _validate_log_options(lines, since)
+    context = _diagnostic_context(name, symptom, expected, recent_change)
     manager = _service_manager()
     details: Dict[str, Any] = {}
-    findings = []
+    manager_findings = []
     journal: List[str] = []
     log_source = None
+    manager_status = "not_applicable"
+    manager_summary = f"No supported service manager was detected for {name}."
     if manager == "systemd":
         properties = (
             "LoadState,ActiveState,SubState,UnitFileState,Result,ExecMainStatus,"
@@ -3334,27 +3508,40 @@ def service_diagnostic(
         load_state = details.get("LoadState")
         active_state = details.get("ActiveState")
         if not command["ok"] and not details:
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"systemd could not query {name}."
+            manager_findings.append(_finding(
                 "service_query_failed", "critical", f"Service state for '{name}' could not be queried.",
                 evidence=command.get("error"),
                 recommendation="Check service-manager availability, permissions, and whether the host booted with systemd.",
+                phase="service_manager",
             ))
         elif load_state == "not-found":
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"systemd does not define {name}."
+            manager_findings.append(_finding(
                 "service_not_found", "critical", f"Service unit '{name}' was not found.",
                 recommendation="Confirm the package, unit name, and installation path.",
+                phase="service_manager",
             ))
         elif active_state != "active":
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"systemd reports {name} as {active_state or 'inactive'}."
+            manager_findings.append(_finding(
                 "service_inactive", "critical", f"Service '{name}' is not active.",
                 evidence=f"ActiveState={active_state}, SubState={details.get('SubState')}, Result={details.get('Result')}",
                 recommendation="Review configuration and service logs before attempting a restart.",
+                phase="service_manager",
             ))
+        else:
+            manager_status = "passed"
+            manager_summary = f"systemd reports {name} as active ({details.get('SubState') or 'running'})."
         if details.get("ExecMainStatus") not in {None, "", "0"}:
-            findings.append(_finding(
+            manager_findings.append(_finding(
                 "service_exit_status", "warning",
                 f"The last main process exit status was {details['ExecMainStatus']}.",
                 recommendation="Correlate the exit code with the unit journal and application logs.",
+                phase="service_manager",
             ))
         if include_logs:
             log_source = "journalctl"
@@ -3368,63 +3555,147 @@ def service_diagnostic(
             selected = log_command["stdout"].splitlines()[-lines:]
             journal = selected if raw_logs else [_redact_log_line(line) for line in selected]
             if not log_command["ok"] and log_command.get("error"):
-                findings.append(_finding(
+                manager_findings.append(_finding(
                     "service_logs_unavailable", "warning", "Service journal could not be read.",
                     evidence=log_command["error"],
                     recommendation="Check journal access for the current user.",
+                    phase="logs",
                 ))
     elif manager == "openrc":
         command = _diagnostic_command(["rc-service", name, "status"], timeout=timeout)
         details = {"output": _redact_log_line((command["stdout"] + command["stderr"]).strip())}
         if not command["ok"]:
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"OpenRC does not report {name} as running."
+            manager_findings.append(_finding(
                 "service_inactive", "critical", f"OpenRC reports '{name}' as unavailable or stopped.",
                 evidence=details["output"],
                 recommendation="Review the application configuration and OpenRC log destination.",
+                phase="service_manager",
             ))
+        else:
+            manager_status = "passed"
+            manager_summary = f"OpenRC reports {name} as running."
     elif manager == "sysv":
         command = _diagnostic_command(["service", name, "status"], timeout=timeout)
         details = {"output": _redact_log_line((command["stdout"] + command["stderr"]).strip())}
         if not command["ok"]:
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"SysV init does not report {name} as running."
+            manager_findings.append(_finding(
                 "service_inactive", "critical", f"Service '{name}' is unavailable or stopped.",
                 evidence=details["output"],
                 recommendation="Review the application configuration and service log destination.",
+                phase="service_manager",
             ))
+        else:
+            manager_status = "passed"
+            manager_summary = f"SysV init reports {name} as running."
     elif manager == "launchd":
         command = _diagnostic_command(["launchctl", "print", f"system/{name}"], timeout=timeout)
         details = {"output": _redact_log_line(command["stdout"][-8192:])}
         if not command["ok"]:
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"launchd does not report {name} as active."
+            manager_findings.append(_finding(
                 "service_inactive", "critical", f"launchd could not find an active '{name}' service.",
                 recommendation="Confirm the launchd label and inspect its configured log paths.",
+                phase="service_manager",
             ))
+        else:
+            manager_status = "passed"
+            manager_summary = f"launchd reports {name} as active."
     elif manager == "windows-scm":
         command = _diagnostic_command(["sc", "query", name], timeout=timeout)
         details = {"output": _redact_log_line(command["stdout"][-8192:])}
         if not command["ok"] or "RUNNING" not in command["stdout"].upper():
-            findings.append(_finding(
+            manager_status = "failed"
+            manager_summary = f"Windows SCM does not report {name} as running."
+            manager_findings.append(_finding(
                 "service_inactive", "critical", f"Windows Service Control Manager does not report '{name}' as running.",
                 evidence=_redact_log_line((command["stdout"] + command["stderr"]).strip()),
                 recommendation="Confirm the service name and review the Windows Event Log.",
+                phase="service_manager",
             ))
+        else:
+            manager_status = "passed"
+            manager_summary = f"Windows SCM reports {name} as running."
     else:
-        findings.append(_finding(
+        manager_status = "warning"
+        manager_findings.append(_finding(
             "service_manager_unavailable", "warning", "No supported service manager was detected.",
             recommendation="Use the process list and application-specific diagnostics.",
+            phase="service_manager",
         ))
     if include_logs and manager != "systemd":
-        findings.append(_finding(
+        manager_findings.append(_finding(
             "service_log_source_unspecified", "info",
             f"Automatic service-log collection is not defined for {manager}.",
             recommendation="Use the log path configured by the application or the platform event-log viewer.",
+            phase="logs",
         ))
     processes = _process_matches(name, timeout) if platform.system().lower() != "windows" else []
+    findings = list(manager_findings)
+    mismatch_codes = {"service_query_failed", "service_not_found", "service_inactive", "service_manager_unavailable"}
+    if processes and any(item.get("code") in mismatch_codes for item in findings):
+        findings = [item for item in findings if item.get("code") not in mismatch_codes]
+        findings.append(_finding(
+            "service_manager_process_mismatch", "warning",
+            f"The service manager does not report '{name}' as active, but matching process(es) are running.",
+            evidence=f"matching_processes={len(processes)}",
+            recommendation="Determine whether the application is managed by another unit, container, supervisor, or standalone launcher before changing state.",
+            phase="service_manager",
+        ))
+        manager_status = "warning"
+        manager_summary = f"The manager state conflicts with {len(processes)} running process(es)."
     findings = _deduplicate_findings(findings)
+    manager_phase_findings = [item for item in findings if item.get("phase") == "service_manager"]
+    log_findings = [item for item in findings if item.get("phase") == "logs"]
+    if any(item.get("severity") == "critical" for item in manager_phase_findings):
+        manager_status = "failed"
+    elif any(item.get("severity") == "warning" for item in manager_phase_findings):
+        manager_status = "warning"
+    steps = [
+        _diagnostic_step(
+            "context", "Define the problem", "passed" if _has_operator_context(context) else "warning",
+            "Operator context was recorded." if _has_operator_context(context) else
+            "No symptom, expectation, or recent change was supplied; conclusions are limited to the current snapshot.",
+        ),
+        _diagnostic_step(
+            "service_manager", "Query the service manager", manager_status, manager_summary,
+            depends_on=["context"], evidence={"manager": manager, "state": details.get("ActiveState") or details.get("output")},
+        ),
+        _diagnostic_step(
+            "process", "Correlate running processes",
+            "passed" if processes or details.get("MainPID") not in {None, "", "0"} else
+            "not_applicable" if platform.system().lower() == "windows" or manager_status == "passed" else "warning",
+            f"Found {len(processes)} exact-name process(es)." if processes else
+            f"The service manager reports main PID {details.get('MainPID')}." if details.get("MainPID") not in {None, "", "0"} else
+            "Process correlation is unavailable on Windows." if platform.system().lower() == "windows" else
+            "The manager already reports the service active; exact executable-name correlation is not required." if manager_status == "passed" else
+            "No exact-name process was found; the executable name may differ from the service name.",
+            depends_on=["service_manager"],
+        ),
+        _diagnostic_step(
+            "logs", "Inspect time-bounded service logs",
+            "warning" if any(item.get("severity") in {"critical", "warning"} for item in log_findings) else
+            "passed" if include_logs and manager == "systemd" else "skipped" if not include_logs else "not_applicable",
+            f"Collected {len(journal)} redacted journal line(s) since {since}." if journal else
+            "Log content was not requested." if not include_logs else
+            f"No service journal entries were returned since {since}." if manager == "systemd" else
+            f"Automatic journal collection is not available for {manager}.",
+            depends_on=["service_manager"],
+        ),
+    ]
     return {
         "service": name,
         "manager": manager,
         "status": _diagnostic_status(findings),
+        "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "service-state", "Define the symptom, query the manager, correlate processes, then inspect bounded logs before changing state.", steps,
+        ),
         "details": details,
         "processes": processes,
         "journal": journal,
@@ -3433,6 +3704,7 @@ def service_diagnostic(
         "log_source": log_source,
         "logs_included": include_logs,
         "logs_redacted": include_logs and not raw_logs,
+        "cause_candidates": _rank_cause_candidates(findings),
         "findings": findings,
     }
 
@@ -3597,7 +3869,7 @@ def _time_sync_status(timeout: float) -> Dict[str, Any]:
 
 def _listening_sockets(timeout: float = 5.0) -> Dict[str, Any]:
     if shutil.which("ss"):
-        command = _diagnostic_command(["ss", "-H", "-lntu"], timeout=timeout)
+        command = _diagnostic_command(["ss", "-H", "-lntux"], timeout=timeout)
         source = "ss"
     elif shutil.which("netstat"):
         command = _diagnostic_command(["netstat", "-an"], timeout=timeout)
@@ -3617,12 +3889,18 @@ def _listening_sockets(timeout: float = 5.0) -> Dict[str, Any]:
             local = fields[4]
         elif source == "netstat" and len(fields) >= 4:
             local = fields[3]
-        match = re.search(r"(?:\]|:|\.)(\d+)$", local)
-        listeners.append({
-            "protocol": protocol,
-            "local_address": local,
-            "port": int(match.group(1)) if match else None,
-        })
+        if protocol.startswith("u_") or protocol == "unix":
+            listeners.append({
+                "family": "unix", "protocol": protocol,
+                "local_address": local, "path": local, "port": None,
+            })
+        else:
+            match = re.search(r"(?:\]|:|\.)(\d+)$", local)
+            listeners.append({
+                "family": "ip", "protocol": protocol,
+                "local_address": local,
+                "port": int(match.group(1)) if match else None,
+            })
         if len(listeners) >= 1000:
             break
     return {
@@ -3634,54 +3912,259 @@ def _listening_sockets(timeout: float = 5.0) -> Dict[str, Any]:
     }
 
 
+def _route_to_address(address: str, timeout: float) -> Dict[str, Any]:
+    """Resolve the selected egress route without sending traffic."""
+    system = platform.system().lower()
+    if system == "linux" and shutil.which("ip"):
+        command = _diagnostic_command(["ip", "-j", "route", "get", address], timeout=timeout)
+        route = None
+        if command["ok"]:
+            try:
+                rows = json.loads(command["stdout"])
+                route = rows[0] if rows else None
+            except (json.JSONDecodeError, TypeError, IndexError):
+                route = None
+        return {
+            "available": command["available"], "status": "ok" if route else "failed",
+            "destination": address, "route": route,
+            "error": None if route else command.get("error") or "route lookup returned no result",
+        }
+    if system == "darwin" and shutil.which("route"):
+        command = _diagnostic_command(["route", "-n", "get", address], timeout=timeout)
+        values = {}
+        for line in command["stdout"].splitlines():
+            key, separator, value = line.strip().partition(":")
+            if separator:
+                values[key.strip()] = value.strip()
+        return {
+            "available": command["available"], "status": "ok" if command["ok"] else "failed",
+            "destination": address, "route": values or None,
+            "error": command.get("error") if not command["ok"] else None,
+        }
+    return {
+        "available": False, "status": "not_applicable", "destination": address,
+        "route": None, "error": "target-specific route lookup is unavailable on this platform",
+    }
+
+
 def network_diagnostic(
     probe: Optional[str] = None,
     port: int = 443,
     timeout: float = 5.0,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Inspect local networking and optionally test one DNS/TCP endpoint."""
+    """Follow a bottom-up network path and optionally test one endpoint."""
     if timeout <= 0:
         raise ValueError("Timeout must be greater than zero")
     _validate_port(port)
+    context = _diagnostic_context(probe or "local network", symptom, expected, recent_change)
     inventory = local_network_inventory()
     listeners = _listening_sockets(timeout)
     findings = []
-    if not inventory.get("default_routes"):
+    interfaces = inventory.get("interfaces", [])
+    non_loopback = [item for item in interfaces if item.get("name") not in {"lo", "lo0"}]
+    active_interfaces = [
+        item for item in non_loopback
+        if str(item.get("state") or "").upper() in {"UP", "UNKNOWN", "CONNECTED"}
+        or any(address.get("scope") == "global" for address in item.get("addresses", []))
+        or (not item.get("state") and bool(item.get("addresses")))
+    ]
+    if not interfaces:
+        findings.append(_finding(
+            "network_interfaces_unavailable", "warning", "No network-interface inventory was collected.",
+            evidence="; ".join(inventory.get("errors", [])) or None,
+            recommendation="Check platform tooling and inspect interface/link state manually.", phase="link",
+        ))
+    elif probe and not active_interfaces:
+        findings.append(_finding(
+            "network_link_unavailable", "critical", "No active non-loopback network interface was detected.",
+            recommendation="Check interface administrative state, carrier, VLAN attachment, and the platform network manager.",
+            phase="link",
+        ))
+    endpoint = parse_endpoint(probe, default_port=port) if probe else None
+    host_is_ip = False
+    if endpoint:
+        try:
+            ipaddress.ip_address(endpoint["host"])
+            host_is_ip = True
+        except ValueError:
+            pass
+    if not inventory.get("default_routes") and (not endpoint or not host_is_ip):
         findings.append(_finding(
             "default_route_missing", "warning", "No default route was detected.",
             recommendation="Check interface state, addressing, and the expected routing table.",
+            phase="routing",
         ))
-    if not inventory.get("dns_servers"):
+    if not inventory.get("dns_servers") and (not endpoint or not host_is_ip):
         findings.append(_finding(
             "dns_servers_missing", "warning", "No DNS resolver was detected.",
             recommendation="Inspect the resolver configuration and network manager state.",
+            phase="dns",
         ))
     checks: Dict[str, Any] = {}
-    if probe:
-        endpoint = parse_endpoint(probe, default_port=port)
-        checks["dns"] = resolve_all(endpoint["host"], timeout)
-        checks["tcp"] = tcp_probe(endpoint["host"], endpoint["port"], timeout)
-        if checks["dns"]["status"] != "ok":
+    selected_address = None
+    route = None
+    if endpoint:
+        if host_is_ip:
+            selected_address = endpoint["host"]
+            checks["dns"] = {
+                "status": "not_applicable", "addresses": [],
+                "reason": "The target is already an IP address.",
+            }
+        else:
+            checks["dns"] = resolve_all(endpoint["host"], timeout)
+            if checks["dns"]["status"] == "ok" and checks["dns"].get("addresses"):
+                selected_address = checks["dns"]["addresses"][0]["address"]
+        if checks["dns"]["status"] == "failed":
             findings.append(_finding(
                 "probe_dns_failed", "critical", f"DNS resolution failed for {endpoint['host']}.",
                 evidence=checks["dns"].get("error"),
                 recommendation="Check the resolver, search domains, and authoritative DNS records.",
+                phase="dns",
             ))
-        if checks["tcp"]["status"] != "ok":
+            checks["tcp"] = {
+                "status": "skipped", "host": endpoint["host"], "port": endpoint["port"],
+                "reason": "Transport probing depends on successful name resolution.",
+            }
+        else:
+            route_candidates = []
+            addresses_to_check = (
+                [str(selected_address)] if host_is_ip else
+                [str(item["address"]) for item in checks.get("dns", {}).get("addresses", [])]
+            )
+            for address in addresses_to_check:
+                candidate_route = _route_to_address(address, timeout)
+                route_candidates.append(candidate_route)
+                if candidate_route.get("status") == "ok":
+                    route = candidate_route
+                    selected_address = address
+                    break
+            if route is None and route_candidates:
+                route = route_candidates[0]
+            checks["route"] = route
+            checks["route_candidates"] = route_candidates
+            if route and route["status"] == "failed":
+                findings.append(_finding(
+                    "probe_route_failed", "critical", f"No usable route was found for {selected_address}.",
+                    evidence=route.get("error"),
+                    recommendation="Check the selected routing table, source address, gateway, and network namespace.",
+                    phase="routing",
+                ))
+            checks["tcp"] = tcp_probe(endpoint["host"], endpoint["port"], timeout)
+            checks["tcp"]["requested_host"] = endpoint["host"]
+        if checks["tcp"]["status"] == "failed":
             findings.append(_finding(
                 "probe_tcp_failed", "critical",
                 f"TCP connection to {endpoint['host']}:{endpoint['port']} failed.",
                 evidence=checks["tcp"].get("error"),
                 recommendation="Check routing, firewall policy, listener state, and the target service.",
+                phase="transport",
             ))
+        if endpoint.get("scheme") and checks["tcp"]["status"] == "ok":
+            url_host = f"[{endpoint['host']}]" if ":" in endpoint["host"] else endpoint["host"]
+            default = 443 if endpoint["scheme"] == "https" else 80
+            authority = url_host if endpoint["port"] == default else f"{url_host}:{endpoint['port']}"
+            request_path = endpoint.get("path") or "/"
+            if endpoint.get("query"):
+                request_path += "?" + endpoint["query"]
+            url = f"{endpoint['scheme']}://{authority}{request_path}"
+            checks["application"] = _http_status_probe(url, None, timeout)
+            if checks["application"]["status"] == "failed":
+                findings.append(_finding(
+                    "probe_application_failed", "critical", "The application-layer probe failed.",
+                    evidence=str(checks["application"].get("error") or checks["application"].get("status_code")),
+                    recommendation="Keep the working lower layers and inspect TLS or application configuration next.",
+                    phase="application",
+                ))
+            elif checks["application"]["status"] == "warning":
+                findings.append(_finding(
+                    "probe_application_warning", "warning",
+                    f"The application returned HTTP {checks['application'].get('status_code')}.",
+                    recommendation="Keep the working lower layers and inspect the application response and selected virtual host.",
+                    phase="application",
+                ))
     findings = _deduplicate_findings(findings)
+    phase_findings = {
+        phase: [item for item in findings if item.get("phase") == phase]
+        for phase in ("link", "routing", "dns", "transport", "application")
+    }
+    steps = [
+        _diagnostic_step(
+            "context", "Define endpoint and symptom", "passed" if probe or _has_operator_context(context) else "warning",
+            "A target or operator context was supplied." if probe or _has_operator_context(context) else
+            "No endpoint or operator context was supplied; only local state is assessed.",
+        ),
+        _diagnostic_step(
+            "link", "Check interfaces and link state",
+            "failed" if any(item["severity"] == "critical" for item in phase_findings["link"]) else
+            "warning" if phase_findings["link"] else "passed",
+            f"Collected {len(interfaces)} interface(s); {len(active_interfaces)} non-loopback interface(s) appear active.",
+            layer="OSI 1-2", depends_on=["context"],
+        ),
+        _diagnostic_step(
+            "addressing", "Check local addressing", "passed" if interfaces else "warning",
+            "Local interface addresses were inventoried." if interfaces else "Address inventory is unavailable.",
+            layer="OSI 3", depends_on=["link"],
+        ),
+        _diagnostic_step(
+            "local_routing", "Check the local routing prerequisite",
+            "warning" if any(item.get("code") == "default_route_missing" for item in phase_findings["routing"]) else "passed",
+            "A default route is present." if inventory.get("default_routes") else
+            "No default route was found; directly connected targets may still be reachable.",
+            layer="OSI 3", depends_on=["addressing"],
+        ),
+        _diagnostic_step(
+            "dns", "Resolve the endpoint name",
+            "failed" if phase_findings["dns"] else "not_applicable" if host_is_ip else "passed" if endpoint else "skipped",
+            "The target is an IP address." if host_is_ip else
+            "Name resolution succeeded." if endpoint and checks.get("dns", {}).get("status") == "ok" else
+            "No endpoint was supplied." if not endpoint else "Name resolution failed.",
+            layer="Application infrastructure", depends_on=["local_routing"],
+        ),
+        _diagnostic_step(
+            "target_route", "Select the route to the resolved target",
+            "failed" if any(
+                item.get("code") == "probe_route_failed" and item.get("severity") == "critical"
+                for item in phase_findings["routing"]
+            ) else
+            "passed" if route and route.get("status") == "ok" else
+            "skipped" if not endpoint or checks.get("dns", {}).get("status") == "failed" else "not_applicable",
+            "A target-specific route was selected." if route and route.get("status") == "ok" else
+            "No target was supplied." if not endpoint else
+            "Target route selection depends on successful name resolution." if checks.get("dns", {}).get("status") == "failed" else
+            "Target-specific route lookup is unavailable on this platform.",
+            layer="OSI 3", depends_on=["dns"],
+        ),
+        _diagnostic_step(
+            "transport", "Open the target transport",
+            "failed" if phase_findings["transport"] else "passed" if checks.get("tcp", {}).get("status") == "ok" else "skipped",
+            "TCP connectivity succeeded." if checks.get("tcp", {}).get("status") == "ok" else
+            checks.get("tcp", {}).get("reason", "No transport probe was run."),
+            layer="OSI 4", depends_on=["target_route"],
+        ),
+        _diagnostic_step(
+            "application", "Test TLS and application response",
+            "failed" if phase_findings["application"] else "passed" if checks.get("application", {}).get("status") == "ok" else
+            "warning" if checks.get("application", {}).get("status") == "warning" else "skipped",
+            "The application responded." if checks.get("application") else "Supply an HTTP or HTTPS URL to test the application layer.",
+            layer="OSI 6-7", depends_on=["transport"],
+        ),
+    ]
     return {
         "status": _diagnostic_status(findings),
+        "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "network-bottom-up", "Define the path, then move from local link and addressing through routing, name resolution, transport, and application.", steps,
+        ),
         "platform": platform.system(),
         "inventory": inventory,
         "listening_sockets": listeners,
         "probe": probe,
         "checks": checks,
+        "cause_candidates": _rank_cause_candidates(findings),
         "findings": findings,
     }
 
@@ -3694,11 +4177,15 @@ def system_diagnostic(
     since: str = "1 hour ago",
     raw_logs: bool = False,
     timeout: float = 10.0,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Collect a read-only host health overview with actionable findings."""
     _validate_log_options(lines, since)
     if timeout <= 0:
         raise ValueError("Timeout must be greater than zero")
+    context = _diagnostic_context(socket.gethostname(), symptom, expected, recent_change)
     cpu_count = os.cpu_count() or 1
     load = None
     try:
@@ -3720,36 +4207,40 @@ def system_diagnostic(
     processes = _process_summary()
     time_sync = _time_sync_status(timeout)
     disk = disk_diagnostic(path, include_du=include_du, timeout=max(timeout, 30.0))
-    network = network_diagnostic(timeout=timeout)
-    findings = list(disk["findings"]) + list(network["findings"])
+    findings = list(disk["findings"])
     if load and load["one_minute_per_cpu"] >= 2:
         findings.append(_finding(
             "load_critical", "critical", "One-minute load is at least twice the CPU count.",
             evidence=f"normalized load={load['one_minute_per_cpu']}",
             recommendation="Inspect runnable and uninterruptible processes, I/O pressure, and recent workload changes.",
+            phase="resources",
         ))
     elif load and load["one_minute_per_cpu"] >= 1.2:
         findings.append(_finding(
             "load_high", "warning", "One-minute load is above the CPU count.",
             evidence=f"normalized load={load['one_minute_per_cpu']}",
             recommendation="Correlate CPU, I/O wait, and process activity before capacity is exhausted.",
+            phase="resources",
         ))
     available_percent = memory.get("available_percent")
     if available_percent is not None and available_percent < 5:
         findings.append(_finding(
             "memory_critical", "critical", f"Available memory is critically low ({available_percent}%).",
             recommendation="Identify memory growth and OOM events before restarting or terminating a process.",
+            phase="resources",
         ))
     elif available_percent is not None and available_percent < 10:
         findings.append(_finding(
             "memory_low", "warning", f"Available memory is low ({available_percent}%).",
             recommendation="Inspect working sets, cache pressure, swap activity, and recent growth.",
+            phase="resources",
         ))
     swap_used_percent = memory.get("swap_used_percent")
     if isinstance(swap_used_percent, (int, float)) and swap_used_percent >= 90:
         findings.append(_finding(
             "swap_high", "warning", f"Swap usage is high ({memory['swap_used_percent']}%).",
             recommendation="Check whether swap-in activity is current before treating allocated swap as active pressure.",
+            phase="resources",
         ))
     if processes.get("zombies", 0):
         zombie_count = processes["zombies"]
@@ -3757,11 +4248,13 @@ def system_diagnostic(
             "zombie_processes", "warning" if zombie_count >= 5 else "info",
             f"{zombie_count} zombie process(es) detected.",
             recommendation="Identify and diagnose the parent process responsible for reaping child exit status.",
+            phase="processes",
         ))
     if time_sync.get("ok") and time_sync.get("synchronized") is False:
         findings.append(_finding(
             "time_not_synchronized", "warning", "The service manager reports that system time is not synchronized.",
             recommendation="Check the configured NTP client, source reachability, offset, and recent clock changes.",
+            phase="time",
         ))
     for resource, rows in pressure.items():
         full_avg10 = rows.get("full", {}).get("avg10", 0)
@@ -3770,9 +4263,11 @@ def system_diagnostic(
                 f"{resource}_pressure", "warning",
                 f"Sustained {resource} pressure is elevated (full avg10={full_avg10}).",
                 recommendation="Correlate pressure stalls with processes and resource saturation.",
+                phase="resources",
             ))
     failed_services: List[str] = []
-    if _service_manager() == "systemd":
+    service_manager = _service_manager()
+    if service_manager == "systemd":
         command = _diagnostic_command(
             ["systemctl", "--failed", "--no-legend", "--plain", "--no-pager"],
             timeout=timeout,
@@ -3783,6 +4278,7 @@ def system_diagnostic(
                 findings.append(_finding(
                     "failed_services", "warning", f"{len(failed_services)} failed systemd unit(s) detected.",
                     recommendation="Run a targeted service diagnostic and inspect its journal before changing state.",
+                    phase="services",
                 ))
     journal: List[str] = []
     if include_logs:
@@ -3798,15 +4294,76 @@ def system_diagnostic(
                 findings.append(_finding(
                     "system_logs_unavailable", "warning", "System journal could not be read.",
                     evidence=command.get("error"), recommendation="Check journal permissions for the current user.",
+                    phase="logs",
                 ))
         else:
             findings.append(_finding(
                 "system_log_source_unavailable", "info", "journalctl is not available on this host.",
                 recommendation="Inspect the platform's configured system log destination.",
+                phase="logs",
             ))
+    network = network_diagnostic(timeout=timeout)
+    findings.extend(network["findings"])
     findings = _deduplicate_findings(findings)
+    critical_resource = any(
+        item.get("severity") == "critical" and item.get("phase") in {"resources", "capacity", "inodes", "mount"}
+        for item in findings
+    )
+    warning_resource = any(
+        item.get("severity") == "warning" and item.get("phase") in {"resources", "capacity", "inodes", "mount"}
+        for item in findings
+    )
+    network_status = network.get("status", "ok")
+    steps = [
+        _diagnostic_step(
+            "context", "Define symptom and time window", "passed" if _has_operator_context(context) else "warning",
+            "Operator context was recorded." if _has_operator_context(context) else
+            "No symptom, expectation, or recent change was supplied; this is a point-in-time health snapshot.",
+        ),
+        _diagnostic_step(
+            "identity", "Identify host and uptime", "passed",
+            f"Collected identity for {socket.gethostname()} with {cpu_count} CPU(s).", depends_on=["context"],
+        ),
+        _diagnostic_step(
+            "resources", "Check saturation and hard capacity blockers",
+            "failed" if critical_resource else "warning" if warning_resource else "passed",
+            "Checked load, memory, pressure stalls, filesystem capacity, inodes, and mount state.",
+            depends_on=["identity"],
+        ),
+        _diagnostic_step(
+            "processes", "Check process health", "warning" if processes.get("zombies", 0) else "passed",
+            f"Inspected {processes.get('total', 0)} process(es)." if processes else "Process accounting is unavailable.",
+            depends_on=["resources"],
+        ),
+        _diagnostic_step(
+            "services", "Check failed services",
+            "warning" if failed_services else "passed" if service_manager == "systemd" else "not_applicable",
+            f"Found {len(failed_services)} failed systemd unit(s)." if failed_services else
+            "No failed systemd units were reported." if service_manager == "systemd" else
+            "Global failed-unit enumeration is not available for this service manager.",
+            depends_on=["resources"],
+        ),
+        _diagnostic_step(
+            "logs", "Inspect severe events in the selected time window",
+            "warning" if any(item.get("phase") == "logs" and item.get("severity") == "warning" for item in findings) else
+            "passed" if include_logs else "skipped",
+            f"Collected {len(journal)} redacted severe journal line(s) since {since}." if journal else
+            "Log content was not requested." if not include_logs else "No severe journal entries were returned.",
+            depends_on=["services"],
+        ),
+        _diagnostic_step(
+            "network", "Check local network prerequisites",
+            "failed" if network_status == "failed" else "warning" if network_status == "warning" else "passed",
+            "Ran the bottom-up local network diagnostic.", depends_on=["identity"],
+        ),
+    ]
     return {
         "status": _diagnostic_status(findings),
+        "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "host-health", "Define the symptom, rule out hard resource blockers, inspect processes and services, correlate logs, then verify network prerequisites.", steps,
+        ),
         "host": {
             "hostname": socket.gethostname(), "platform": platform.system(),
             "release": platform.release(), "architecture": platform.machine(),
@@ -3827,6 +4384,7 @@ def system_diagnostic(
         "log_source": "journalctl" if include_logs and shutil.which("journalctl") else None,
         "logs_included": include_logs,
         "logs_redacted": include_logs and not raw_logs,
+        "cause_candidates": _rank_cause_candidates(findings),
         "findings": findings,
     }
 
@@ -3902,6 +4460,7 @@ def _parse_nginx_configuration(text: str, build: Dict[str, Any]) -> Dict[str, An
         name: [] for name in (
             "user", "pid", "error_log", "access_log", "root", "alias", "index", "listen",
             "server_name", "ssl_certificate", "ssl_certificate_key", "proxy_pass", "fastcgi_pass",
+            "try_files",
         )
     }
     names = "|".join(re.escape(name) for name in directives)
@@ -3936,26 +4495,65 @@ def _parse_nginx_configuration(text: str, build: Dict[str, Any]) -> Dict[str, An
             resolved = _nginx_resolve_path(value.split()[0], prefix)
             if resolved:
                 paths["certificates"].append(resolved)
+    listeners = []
     ports = []
+    unix_sockets = []
     for value in directives["listen"]:
-        endpoint = value.split()[0]
-        listen_match = re.search(r"(?:\]|:)(\d+)$", endpoint)
-        if not listen_match:
-            listen_match = re.match(r"^(\d+)$", endpoint)
-        if listen_match:
-            port = int(listen_match.group(1))
-            if port not in ports:
-                ports.append(port)
+        try:
+            tokens = shlex.split(value)
+        except ValueError:
+            tokens = value.split()
+        if not tokens:
+            continue
+        endpoint = tokens[0]
+        options = tokens[1:]
+        if endpoint.startswith("unix:"):
+            socket_path = _nginx_resolve_path(endpoint[5:], prefix)
+            if socket_path:
+                unix_sockets.append(socket_path)
+                listeners.append({
+                    "family": "unix", "path": socket_path, "raw": value,
+                    "ssl": "ssl" in options,
+                })
+            continue
+        port = None
+        address = "*"
+        if endpoint.isdigit():
+            port = int(endpoint)
+        elif endpoint.startswith("["):
+            listen_address = re.fullmatch(r"(\[[^]]+])(?::(\d+))?", endpoint)
+            if listen_address:
+                address = listen_address.group(1)
+                port = int(listen_address.group(2)) if listen_address.group(2) else 80
+        elif ":" in endpoint:
+            address, separator, port_text = endpoint.rpartition(":")
+            if separator and port_text.isdigit():
+                port = int(port_text)
+        else:
+            address = endpoint
+            port = 80
+        listeners.append({
+            "family": "ip", "address": address, "port": port, "raw": value,
+            "ssl": "ssl" in options, "default_server": "default_server" in options,
+        })
+        if port is not None and port not in ports:
+            ports.append(port)
     return {
         "prefix": prefix,
         "config_files": list(dict.fromkeys(config_files)),
         "worker_user": worker_user,
         "worker_group": worker_group,
         "paths": {key: list(dict.fromkeys(values)) for key, values in paths.items()},
+        "listeners": listeners,
         "listen_ports": ports,
+        "unix_sockets": list(dict.fromkeys(unix_sockets)),
+        "implicit_listen": not bool(directives["listen"]),
+        "implicit_port_candidates": [80, 8000] if not directives["listen"] else [],
         "explicit_error_log": bool(directives["error_log"]),
         "explicit_access_log": bool(directives["access_log"]),
         "server_names": list(dict.fromkeys(directives["server_name"])),
+        "indexes": list(dict.fromkeys(directives["index"])),
+        "try_files": list(dict.fromkeys(directives["try_files"])),
         "upstreams": list(dict.fromkeys(
             _redact_nginx_endpoint(value)
             for value in directives["proxy_pass"] + directives["fastcgi_pass"]
@@ -4082,37 +4680,216 @@ def _nginx_log_findings(error_lines: List[str], access_lines: List[str]) -> List
     return findings
 
 
-def _http_status_probe(url: str, host_header: Optional[str], timeout: float) -> Dict[str, Any]:
-    parsed = urllib.parse.urlparse(url)
+def _host_from_authority(value: str) -> str:
+    """Extract and validate the host portion of an HTTP authority value."""
+    authority = value.strip()
+    if not authority or len(authority) > 255 or any(ord(char) < 33 for char in authority):
+        raise ValueError("Invalid Host header or TLS server name")
+    if authority.startswith("["):
+        closing = authority.find("]")
+        if closing < 0:
+            raise ValueError("Invalid bracketed Host header")
+        host = authority[1:closing]
+        remainder = authority[closing + 1:]
+        if remainder and (not remainder.startswith(":") or not remainder[1:].isdigit()):
+            raise ValueError("Invalid Host header port")
+        if remainder:
+            _validate_port(int(remainder[1:]))
+    elif authority.count(":") == 1 and authority.rsplit(":", 1)[1].isdigit():
+        host, port_text = authority.rsplit(":", 1)
+        _validate_port(int(port_text))
+    else:
+        host = authority
+    return _validate_host(host)
+
+
+def _http_probe_once(
+    url: str,
+    host_header: Optional[str],
+    timeout: float,
+    sni: Optional[str],
+    verify_tls: bool,
+) -> Dict[str, Any]:
+    """Make one direct HEAD request without environment proxies or redirects."""
+    parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("Nginx probe URL must use http:// or https://")
-    headers = {"User-Agent": f"SysAdminToolbox/{__version__}"}
-    if host_header:
-        if len(host_header) > 255 or any(ord(char) < 33 for char in host_header):
-            raise ValueError("Invalid Host header")
-        headers["Host"] = host_header
-    request = urllib.request.Request(url, headers=headers, method="HEAD")
-    started = time.monotonic()
+        raise ValueError("Probe URL must use http:// or https://")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Credentials are not accepted in diagnostic probe URLs")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return {
-                "status": "ok", "status_code": response.status,
-                "reason": response.reason, "final_url": _redact_url(response.geturl()),
-                "server": response.headers.get("Server"),
-                "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError(f"Invalid probe URL port: {exc}")
+    connect_host = _validate_host(parsed.hostname)
+    default_port = 443 if parsed.scheme == "https" else 80
+    formatted_host = f"[{connect_host}]" if ":" in connect_host else connect_host
+    authority = formatted_host if port == default_port else f"{formatted_host}:{port}"
+    request_host = host_header or authority
+    request_name = _host_from_authority(request_host)
+    tls_name = _host_from_authority(sni) if sni else request_name if parsed.scheme == "https" else None
+    path = urllib.parse.quote(parsed.path or "/", safe="/%:@!$&'()*+,;=-._~")
+    if parsed.query:
+        path += "?" + urllib.parse.quote(parsed.query, safe="=&;%:@!$'()*+,-._~/?")
+    request = (
+        f"HEAD {path} HTTP/1.1\r\n"
+        f"Host: {request_host}\r\n"
+        f"User-Agent: SysAdminToolbox/{__version__}\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii", errors="strict")
+    started = time.monotonic()
+    connection = None
+    try:
+        connection = socket.create_connection((connect_host, port), timeout=timeout)
+        connection.settimeout(timeout)
+        tls_details = None
+        if parsed.scheme == "https":
+            context = ssl.create_default_context()
+            if not verify_tls:
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+            connection = context.wrap_socket(connection, server_hostname=tls_name)
+            cipher = connection.cipher()
+            certificate = connection.getpeercert()
+            tls_details = {
+                "verified": verify_tls,
+                "server_name": tls_name,
+                "version": connection.version(),
+                "cipher": cipher[0] if cipher else None,
+                "certificate_subject": certificate.get("subject") if certificate else None,
+                "subject_alt_names": certificate.get("subjectAltName") if certificate else None,
             }
-    except urllib.error.HTTPError as exc:
+        connection.sendall(request)
+        response = http.client.HTTPResponse(connection)
+        response.begin()
+        headers = {key.lower(): value for key, value in response.getheaders()}
+        status = "failed" if response.status >= 500 else "warning" if response.status >= 400 else "ok"
         return {
-            "status": "warning" if exc.code < 500 else "failed", "status_code": exc.code,
-            "reason": exc.reason, "final_url": _redact_url(exc.geturl()),
-            "server": exc.headers.get("Server") if exc.headers else None,
+            "status": status,
+            "status_code": response.status,
+            "reason": response.reason,
+            "url": _redact_url(url),
+            "connect_host": connect_host,
+            "host_header": request_host,
+            "tls": tls_details,
+            "server": headers.get("server"),
+            "location": headers.get("location"),
             "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
         }
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (ssl.SSLError, socket.timeout, OSError, ValueError, http.client.HTTPException) as exc:
         return {
-            "status": "failed", "error": str(exc),
+            "status": "failed", "url": _redact_url(url), "connect_host": connect_host,
+            "host_header": request_host, "tls_server_name": tls_name,
+            "error": str(exc), "error_type": type(exc).__name__,
             "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
         }
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+
+def _http_status_probe(
+    url: str,
+    host_header: Optional[str],
+    timeout: float,
+    sni: Optional[str] = None,
+    follow_redirects: bool = False,
+    verify_tls: bool = True,
+    max_redirects: int = 5,
+) -> Dict[str, Any]:
+    """Probe an HTTP endpoint directly, with explicit Host/SNI and redirect policy."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    if not 0 <= max_redirects <= 10:
+        raise ValueError("Maximum redirects must be between 0 and 10")
+    started = time.monotonic()
+    current = url
+    chain = []
+    for redirect_index in range(max_redirects + 1):
+        result = _http_probe_once(
+            current,
+            host_header if redirect_index == 0 else None,
+            timeout,
+            sni if redirect_index == 0 else None,
+            verify_tls,
+        )
+        chain.append({
+            key: result.get(key) for key in ("url", "status_code", "location", "connect_host", "host_header")
+            if result.get(key) is not None
+        })
+        code = result.get("status_code")
+        location = result.get("location")
+        if not (follow_redirects and code in {301, 302, 303, 307, 308} and location):
+            result["initial_url"] = _redact_url(url)
+            result["final_url"] = result.get("url", _redact_url(current))
+            result["redirected"] = len(chain) > 1
+            result["redirect_chain"] = chain
+            result["redirect_policy"] = "follow" if follow_redirects else "stop"
+            result["proxy_policy"] = "direct"
+            result["elapsed_ms_total"] = round((time.monotonic() - started) * 1000, 2)
+            return result
+        if redirect_index == max_redirects:
+            return {
+                "status": "failed", "error": f"redirect limit exceeded ({max_redirects})",
+                "initial_url": _redact_url(url), "final_url": _redact_url(current),
+                "redirected": True, "redirect_chain": chain, "redirect_policy": "follow",
+                "proxy_policy": "direct",
+                "elapsed_ms_total": round((time.monotonic() - started) * 1000, 2),
+            }
+        next_url = urllib.parse.urljoin(current, location)
+        next_target = urllib.parse.urlsplit(next_url)
+        if (
+            next_target.scheme not in {"http", "https"}
+            or not next_target.hostname
+            or next_target.username is not None
+            or next_target.password is not None
+        ):
+            return {
+                "status": "failed", "error": "redirect target is not a credential-free HTTP/HTTPS URL",
+                "initial_url": _redact_url(url), "final_url": _redact_url(current),
+                "redirected": True, "redirect_chain": chain, "redirect_policy": "follow",
+                "proxy_policy": "direct",
+                "elapsed_ms_total": round((time.monotonic() - started) * 1000, 2),
+            }
+        current = next_url
+    raise RuntimeError("unreachable redirect state")
+
+
+def _discover_nginx_runtime(processes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Extract a running master process binary and safe path arguments."""
+    for process in processes:
+        command = str(process.get("command") or "")
+        marker = re.search(r"\bmaster process\s+(.+)$", command)
+        if not marker:
+            continue
+        try:
+            tokens = shlex.split(marker.group(1))
+        except ValueError:
+            tokens = marker.group(1).split()
+        if not tokens:
+            continue
+        candidate = Path(tokens[0]).expanduser()
+        result: Dict[str, Any] = {
+            "pid": process.get("pid"),
+            "binary": str(candidate.resolve()) if candidate.is_file() else str(candidate),
+            "binary_exists": candidate.is_file(),
+            "config": None,
+            "prefix": None,
+        }
+        index = 1
+        while index < len(tokens):
+            token = tokens[index]
+            if token in {"-c", "-p"} and index + 1 < len(tokens):
+                key = "config" if token == "-c" else "prefix"
+                result[key] = tokens[index + 1]
+                index += 2
+                continue
+            index += 1
+        return result
+    return {"pid": None, "binary": None, "binary_exists": False, "config": None, "prefix": None}
 
 
 def nginx_diagnostic(
@@ -4126,31 +4903,61 @@ def nginx_diagnostic(
     since: str = "1 hour ago",
     raw_logs: bool = False,
     timeout: float = 10.0,
+    sni: Optional[str] = None,
+    follow_redirects: bool = False,
+    verify_tls: bool = True,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Diagnose Nginx syntax, service, paths, listeners, logs, and an optional URL."""
-    if log_mode not in {"none", "system", "service", "error", "access", "all"}:
+    """Diagnose Nginx through an ordered, read-only dependency path."""
+    if log_mode not in {"none", "service", "error", "access", "all"}:
         raise ValueError("Invalid log mode")
     _validate_log_options(lines, since)
     _validate_config_name(service_name.removesuffix(".service"), "service name", max_length=128)
-    executable = binary if os.path.sep in binary else shutil.which(binary)
+    context = _diagnostic_context(url or service_name, symptom, expected, recent_change)
+    if host_header:
+        _host_from_authority(host_header)
+    if sni:
+        _host_from_authority(sni)
     findings = []
+    root_disk = disk_diagnostic("/")
+    findings.extend(root_disk["findings"])
+    include_service_logs = log_mode in {"service", "all"}
+    service = service_diagnostic(
+        service_name, include_logs=include_service_logs, lines=lines, since=since,
+        raw_logs=raw_logs, timeout=timeout, symptom=symptom, expected=expected,
+        recent_change=recent_change,
+    )
+    findings.extend(service["findings"])
+    runtime = _discover_nginx_runtime(service.get("processes", []))
+    executable = binary if os.path.sep in binary else shutil.which(binary)
+    if (not executable or not Path(executable).is_file()) and binary == "nginx" and runtime.get("binary_exists"):
+        executable = runtime["binary"]
+    effective_config = config or (runtime.get("config") if binary == "nginx" else None)
     build: Dict[str, Any] = {}
     syntax: Dict[str, Any] = {"tested": False}
     parsed: Dict[str, Any] = {
         "prefix": None, "config_files": [], "worker_user": None, "worker_group": None,
         "paths": {"roots": [], "aliases": [], "error_logs": [], "access_logs": [], "certificates": []},
-        "listen_ports": [], "server_names": [], "upstreams": [],
+        "listeners": [], "listen_ports": [], "unix_sockets": [], "implicit_listen": False,
+        "implicit_port_candidates": [], "server_names": [], "upstreams": [], "indexes": [], "try_files": [],
         "explicit_error_log": False, "explicit_access_log": False,
     }
     if not executable or not Path(executable).is_file():
         findings.append(_finding(
             "nginx_binary_missing", "critical", f"Nginx binary was not found: {binary}",
             recommendation="Confirm the package installation or pass the binary path with --binary.",
+            phase="runtime",
         ))
     else:
         version_command = _diagnostic_command([str(executable), "-V"], timeout=timeout)
         build = _nginx_build_details(version_command["stdout"] + version_command["stderr"])
-        config_args = ["-c", config] if config else []
+        config_args = []
+        if runtime.get("prefix") and not config:
+            config_args.extend(["-p", str(runtime["prefix"])])
+        if effective_config:
+            config_args.extend(["-c", str(effective_config)])
         test_command = _diagnostic_command([str(executable), "-t"] + config_args, timeout=timeout)
         test_text = "\n".join(
             _redact_log_line(line) for line in (test_command["stdout"] + test_command["stderr"]).splitlines()
@@ -4163,6 +4970,7 @@ def nginx_diagnostic(
             findings.append(_finding(
                 "nginx_config_invalid", "critical", "Nginx configuration validation failed.",
                 evidence=test_text[-4096:], recommendation="Resolve the reported syntax, include, path, or permission error before reloading Nginx.",
+                phase="configuration",
             ))
         dump_command = _diagnostic_command([str(executable), "-T"] + config_args, timeout=timeout)
         if dump_command["stdout"]:
@@ -4172,13 +4980,8 @@ def nginx_diagnostic(
                 "nginx_config_dump_unavailable", "warning", "Expanded Nginx configuration could not be inspected.",
                 evidence=_redact_log_line(dump_command.get("error") or "nginx -T failed"),
                 recommendation="Run the diagnostic with an account allowed to read every included configuration file.",
+                phase="configuration",
             ))
-    include_service_logs = log_mode in {"system", "service", "all"}
-    service = service_diagnostic(
-        service_name, include_logs=include_service_logs, lines=lines, since=since,
-        raw_logs=raw_logs, timeout=timeout,
-    )
-    findings.extend(service["findings"])
     build_args = build.get("configure_arguments", {})
     if not parsed["paths"]["error_logs"] and not parsed.get("explicit_error_log"):
         default_error = build_args.get("error-log-path") or "/var/log/nginx/error.log"
@@ -4203,18 +5006,119 @@ def nginx_diagnostic(
                     error_lines.extend(record.get("lines", []))
                 else:
                     access_lines.extend(record.get("lines", []))
-    findings.extend(_nginx_log_findings(error_lines, access_lines))
+    for item in _nginx_log_findings(error_lines, access_lines):
+        item["phase"] = "application_logs"
+        findings.append(item)
     path_checks = []
     relevant_paths = (
         parsed["paths"]["roots"] + parsed["paths"]["aliases"] + parsed["paths"]["certificates"] +
         parsed["paths"]["error_logs"] + parsed["paths"]["access_logs"]
     )
     worker_user = parsed.get("worker_user")
+    sockets = _listening_sockets(timeout)
+    listening_ports = {item.get("port") for item in sockets["listeners"]}
+    listening_unix = {item.get("path") for item in sockets["listeners"] if item.get("family") == "unix"}
+    runtime_active = bool(service.get("processes")) or service.get("details", {}).get("ActiveState") == "active"
+    for port in parsed.get("listen_ports", []):
+        if sockets.get("available") and runtime_active and port not in listening_ports:
+            findings.append(_finding(
+                "nginx_listener_missing", "critical", f"Configured port {port} was not found in the listening-socket table.",
+                recommendation="Check bind addresses, namespace/container boundaries, socket activation, and startup logs.",
+                phase="listeners",
+            ))
+    for path in parsed.get("unix_sockets", []):
+        if sockets.get("available") and runtime_active and path not in listening_unix:
+            findings.append(_finding(
+                "nginx_unix_listener_missing", "critical", f"Configured Unix listener was not found: {path}",
+                recommendation="Check the effective listen directive, socket directory permissions, process namespace, and startup logs.",
+                phase="listeners",
+            ))
+    if parsed.get("implicit_listen") and sockets.get("available") and runtime_active:
+        candidates = set(parsed.get("implicit_port_candidates", []))
+        if not candidates.intersection(listening_ports):
+            findings.append(_finding(
+                "nginx_implicit_listener_unconfirmed", "warning",
+                "No listener was found on either implicit Nginx default port.",
+                evidence="expected one of 80 or 8000",
+                recommendation="Confirm the master-process privileges, network namespace, and effective server configuration.",
+                phase="listeners",
+            ))
+    http_probe = None
+    branch_summary = "No HTTP symptom was supplied."
+    if url:
+        http_probe = _http_status_probe(
+            url, host_header, timeout, sni=sni, follow_redirects=follow_redirects,
+            verify_tls=verify_tls,
+        )
+        code = http_probe.get("status_code")
+        if http_probe["status"] == "failed":
+            if str(http_probe.get("error_type", "")).startswith("SSL"):
+                branch_summary = "The TLS handshake or certificate verification failed."
+                findings.append(_finding(
+                    "nginx_tls_probe_failed", "critical", branch_summary,
+                    evidence=str(http_probe.get("error")),
+                    recommendation="Check SNI, certificate names, trust chain, validity, protocols, and certificate/key loading.",
+                    phase="application",
+                ))
+            elif code in {502, 503, 504}:
+                branch_summary = f"HTTP {code} points to upstream availability or latency."
+                findings.append(_finding(
+                    "nginx_upstream_http_failure", "critical", branch_summary,
+                    evidence=str(code),
+                    recommendation="Check the selected upstream, its process/socket, DNS, route, capacity, and timeout evidence.",
+                    phase="application",
+                ))
+            else:
+                branch_summary = "The HTTP connection failed or returned a server error."
+                findings.append(_finding(
+                    "nginx_http_failed", "critical", branch_summary,
+                    evidence=str(http_probe.get("error") or code),
+                    recommendation="Keep successful lower-layer checks and correlate listener state, logs, virtual-host selection, and upstream health.",
+                    phase="application",
+                ))
+        elif code == 403:
+            branch_summary = "HTTP 403 selects the access-policy and filesystem-permission branch."
+            findings.append(_finding(
+                "nginx_http_403", "warning", "HTTP probe returned 403 Forbidden.",
+                recommendation="Check access rules, authentication, root/alias traversal, ACLs, SELinux, and AppArmor.",
+                phase="application",
+            ))
+        elif code == 404:
+            branch_summary = "HTTP 404 selects the virtual-host, location, and deployment-path branch."
+            findings.append(_finding(
+                "nginx_http_404", "warning", "HTTP probe returned 404 Not Found.",
+                recommendation="Check virtual-host selection, location precedence, root/alias mapping, and deployed files.",
+                phase="application",
+            ))
+        elif code in {401}:
+            branch_summary = "HTTP 401 selects the authentication-policy branch."
+            findings.append(_finding(
+                "nginx_http_401", "warning", "HTTP probe returned 401 Unauthorized.",
+                recommendation="Confirm that the selected virtual host and location require the intended authentication scheme.",
+                phase="application",
+            ))
+        elif code in {301, 302, 303, 307, 308} and not follow_redirects:
+            branch_summary = "A redirect was observed and intentionally not followed."
+            findings.append(_finding(
+                "nginx_http_redirect", "info", f"HTTP probe returned redirect {code}.",
+                evidence=str(http_probe.get("location") or "location not provided"),
+                recommendation="Inspect the Location target or repeat with --follow-redirects when leaving the original endpoint is intended.",
+                phase="application",
+            ))
+        else:
+            branch_summary = f"HTTP {code} confirms an application response."
+        if not verify_tls and urllib.parse.urlsplit(url).scheme == "https":
+            findings.append(_finding(
+                "nginx_tls_verification_disabled", "warning", "TLS certificate verification was explicitly disabled.",
+                recommendation="Repeat with verification enabled before treating the HTTPS path as healthy.",
+                phase="application",
+            ))
     for path in (parsed["paths"]["roots"] + parsed["paths"]["aliases"])[:100]:
         if not Path(path).exists():
             findings.append(_finding(
                 "nginx_document_root_missing", "warning", f"Configured document root does not exist: {path}",
                 recommendation="Confirm the active virtual host, deployment path, and root/alias mapping.",
+                phase="path_access",
             ))
         check_path = path if Path(path).exists() else str(Path(path).parent)
         check = _path_access_for_user(check_path, worker_user, parsed.get("worker_group"))
@@ -4224,42 +5128,16 @@ def nginx_diagnostic(
                 "nginx_path_permission", "critical", f"Worker user '{worker_user}' cannot traverse a required path.",
                 evidence=str(check.get("blocker")),
                 recommendation="Review ownership, POSIX mode bits, ACLs, and security-module policy; do not recursively chmod content.",
+                phase="path_access",
             ))
     for path in parsed["paths"]["certificates"]:
         if not Path(path).is_file():
             findings.append(_finding(
                 "nginx_certificate_missing", "critical", f"Configured TLS file does not exist: {path}",
                 recommendation="Confirm the certificate/key deployment path and configuration include selected by nginx -T.",
+                phase="configuration",
             ))
     security = _security_frameworks(list(dict.fromkeys(relevant_paths)), timeout)
-    sockets = _listening_sockets(timeout)
-    listening_ports = {item.get("port") for item in sockets["listeners"]}
-    for port in parsed.get("listen_ports", []):
-        if sockets.get("available") and service.get("status") == "ok" and port not in listening_ports:
-            findings.append(_finding(
-                "nginx_listener_missing", "critical", f"Configured port {port} was not found in the listening-socket table.",
-                recommendation="Check bind addresses, namespace/container boundaries, socket activation, and startup logs.",
-            ))
-    http_probe = None
-    if url:
-        http_probe = _http_status_probe(url, host_header, timeout)
-        code = http_probe.get("status_code")
-        if http_probe["status"] == "failed":
-            findings.append(_finding(
-                "nginx_http_failed", "critical", "HTTP probe failed or returned a server error.",
-                evidence=str(http_probe.get("error") or code),
-                recommendation="Correlate the response with listener state, virtual-host selection, error logs, and upstream health.",
-            ))
-        elif code == 403:
-            findings.append(_finding(
-                "nginx_http_403", "warning", "HTTP probe returned 403 Forbidden.",
-                recommendation="Check access rules, authentication, root/alias traversal, ACLs, SELinux, and AppArmor.",
-            ))
-        elif code == 404:
-            findings.append(_finding(
-                "nginx_http_404", "warning", "HTTP probe returned 404 Not Found.",
-                recommendation="Check virtual-host selection, location precedence, root/alias mapping, and deployed files.",
-            ))
     disk_paths = {"/"}
     for path in relevant_paths:
         candidate = Path(path)
@@ -4267,14 +5145,108 @@ def nginx_diagnostic(
             measured = candidate if candidate.is_dir() else candidate.parent
             mount = _mount_details(measured)
             disk_paths.add(str(mount["mountpoint"]) if mount else str(measured))
-    disks = [disk_diagnostic(path) for path in sorted(disk_paths)]
+    disks = [root_disk if path == "/" else disk_diagnostic(path) for path in sorted(disk_paths)]
     for disk in disks:
-        findings.extend(disk["findings"])
+        if disk is not root_disk:
+            findings.extend(disk["findings"])
     findings = _deduplicate_findings(findings)
+    phase_findings = {
+        phase: [item for item in findings if item.get("phase") == phase]
+        for phase in ("runtime", "configuration", "application_logs", "listeners", "application", "path_access")
+    }
+    config_status = (
+        "failed" if any(item.get("severity") == "critical" for item in phase_findings["configuration"]) else
+        "warning" if phase_findings["configuration"] else
+        "passed" if syntax.get("ok") and parsed.get("config_files") else
+        "warning" if syntax.get("ok") else "skipped"
+    )
+    listener_status = (
+        "failed" if any(item.get("severity") == "critical" for item in phase_findings["listeners"]) else
+        "warning" if phase_findings["listeners"] else "passed" if sockets.get("available") else "not_applicable"
+    )
+    application_status = (
+        "failed" if http_probe and http_probe.get("status") == "failed" else
+        "warning" if http_probe and http_probe.get("status") == "warning" else
+        "passed" if http_probe else "skipped"
+    )
+    steps = [
+        _diagnostic_step(
+            "context", "Define symptom, endpoint, and recent change",
+            "passed" if url or _has_operator_context(context) else "warning",
+            "Diagnostic context was supplied." if url or _has_operator_context(context) else
+            "No URL or operator context was supplied; the result is a readiness snapshot.",
+        ),
+        _diagnostic_step(
+            "host_prerequisites", "Rule out hard host blockers",
+            "failed" if root_disk.get("status") == "failed" else "warning" if root_disk.get("status") == "warning" else "passed",
+            "Checked root filesystem capacity, inodes, and mount state.", depends_on=["context"],
+        ),
+        _diagnostic_step(
+            "runtime", "Correlate service manager, processes, and binary",
+            "failed" if not executable else "warning" if service.get("status") == "warning" else
+            "failed" if service.get("status") == "failed" and not service.get("processes") else "passed",
+            f"Using {executable}." if executable else "No executable could be resolved.",
+            depends_on=["host_prerequisites"],
+            evidence={"service_manager": service.get("manager"), "process_count": len(service.get("processes", [])), "runtime": runtime},
+        ),
+        _diagnostic_step(
+            "service_logs", "Inspect bounded service-manager logs",
+            "warning" if any(
+                item.get("phase") == "logs" and item.get("severity") in {"critical", "warning"}
+                for item in service.get("findings", [])
+            ) else
+            "passed" if service.get("logs_collected") else "skipped" if not include_service_logs else "not_applicable",
+            f"Collected {len(service.get('journal', []))} service journal line(s)." if service.get("logs_collected") else
+            "Service logs were not requested." if not include_service_logs else "No automatic service journal was available.",
+            depends_on=["runtime"],
+        ),
+        _diagnostic_step(
+            "configuration", "Validate and expand the active configuration", config_status,
+            f"Validated {len(parsed.get('config_files', []))} active configuration file(s) through nginx -t/-T." if parsed.get("config_files") else
+            "Configuration expansion was not available.",
+            depends_on=["runtime"],
+        ),
+        _diagnostic_step(
+            "application_logs", "Inspect configured Nginx logs",
+            "failed" if any(item.get("severity") == "critical" for item in phase_findings["application_logs"]) else
+            "warning" if phase_findings["application_logs"] else
+            "passed" if error_lines or access_lines else "skipped" if log_mode not in {"error", "access", "all"} else "not_applicable",
+            f"Inspected {len(error_lines)} error and {len(access_lines)} access-log line(s)." if error_lines or access_lines else
+            "Application log content was not requested." if log_mode not in {"error", "access", "all"} else "No readable log content was returned.",
+            depends_on=["configuration"],
+        ),
+        _diagnostic_step(
+            "listeners", "Verify configured listeners", listener_status,
+            f"Compared {len(parsed.get('listeners', []))} configured listener(s) with the local socket table.",
+            layer="OSI 4", depends_on=["runtime", "configuration"],
+        ),
+        _diagnostic_step(
+            "application", "Probe the selected virtual host", application_status,
+            branch_summary, layer="OSI 6-7", depends_on=["listeners"],
+            evidence={
+                "host_header": http_probe.get("host_header") if http_probe else None,
+                "tls_server_name": (http_probe.get("tls") or {}).get("server_name") if http_probe else None,
+                "status_code": http_probe.get("status_code") if http_probe else None,
+            },
+        ),
+        _diagnostic_step(
+            "path_access", "Check the selected content and security policy path",
+            "failed" if any(item.get("severity") == "critical" for item in phase_findings["path_access"]) else
+            "warning" if phase_findings["path_access"] else "passed" if path_checks else "not_applicable",
+            f"Checked {len(path_checks)} root/alias path(s), POSIX traversal, ACL caveats, SELinux, and AppArmor signals.",
+            depends_on=["configuration", "application"],
+        ),
+    ]
     return {
         "status": _diagnostic_status(findings),
         "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "nginx-layered", "Define the symptom, rule out host blockers, correlate runtime and logs, validate the effective configuration, verify transport, then branch on the observed HTTP/TLS result.", steps,
+        ),
         "binary": str(executable) if executable else binary,
+        "runtime_discovery": runtime,
+        "effective_config": effective_config,
         "build": build,
         "syntax": syntax,
         "configuration": parsed,
@@ -4287,6 +5259,7 @@ def nginx_diagnostic(
         "logs_included": log_mode != "none",
         "logs_redacted": log_mode != "none" and not raw_logs,
         "http_probe": http_probe,
+        "cause_candidates": _rank_cause_candidates(findings),
         "findings": findings,
     }
 
@@ -4811,6 +5784,7 @@ def parse_endpoint(target: str, default_port: int = 443) -> Dict[str, Any]:
         raise ValueError("Target must not be empty")
     scheme = None
     path = ""
+    query = ""
     if "://" in raw:
         parsed = urllib.parse.urlparse(raw)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -4822,6 +5796,7 @@ def parse_endpoint(target: str, default_port: int = 443) -> Dict[str, Any]:
         except ValueError as exc:
             raise ValueError(f"Invalid target port: {exc}")
         path = parsed.path or "/"
+        query = parsed.query
     elif raw.startswith("["):
         match = re.fullmatch(r"\[([^]]+)](?::(\d+))?", raw)
         if not match:
@@ -4836,7 +5811,10 @@ def parse_endpoint(target: str, default_port: int = 443) -> Dict[str, Any]:
         port = default_port
     _validate_host(host)
     _validate_port(port)
-    return {"target": raw, "host": host, "port": port, "scheme": scheme, "path": path}
+    return {
+        "target": raw, "host": host, "port": port, "scheme": scheme,
+        "path": path, "query": query,
+    }
 
 
 def resolve_all(host: str, timeout: float = 5.0) -> Dict[str, Any]:
@@ -5196,9 +6174,11 @@ def _setup_parser():
             "  doctor service postgresql --logs service\n"
             "  doctor network database.internal --port 5432\n"
             "  doctor nginx --url http://127.0.0.1 --host-header example.com\n"
+            "  doctor nginx --url https://127.0.0.1 --host-header example.com --sni example.com\n"
             "  doctor nginx --logs all --lines 100\n\n"
             "Diagnostics never change service state, ownership, permissions, or configuration.\n"
-            "Log content is opt-in, bounded, and redacted unless --raw-logs is explicit."
+            "Log content is opt-in, bounded, and redacted unless --raw-logs is explicit.\n"
+            "HTTP probes connect directly; redirects and disabled TLS verification are opt-in."
         ),
     )
     p.add_argument(
@@ -5212,6 +6192,15 @@ def _setup_parser():
     )
     p.add_argument("--url", help="HTTP/HTTPS URL to probe during an Nginx diagnostic")
     p.add_argument("--host-header", help="Explicit Host header for the Nginx URL probe")
+    p.add_argument("--sni", help="Explicit TLS server name when connecting to another address")
+    p.add_argument(
+        "--follow-redirects", action="store_true",
+        help="Follow up to five HTTP redirects (disabled by default)",
+    )
+    p.add_argument(
+        "--insecure", action="store_true",
+        help="Disable TLS certificate verification for the explicit probe only",
+    )
     p.add_argument("--config", help="Explicit Nginx configuration file passed to nginx -t/-T")
     p.add_argument("--binary", default="nginx", help="Nginx executable name or path")
     p.add_argument(
@@ -5227,6 +6216,9 @@ def _setup_parser():
     p.add_argument("--du", action="store_true", help="Collect top-level disk usage (may be slow)")
     p.add_argument("--port", type=int, default=443, help="Default TCP port for doctor network")
     p.add_argument("--timeout", type=float, default=10.0, help="Per-check timeout in seconds")
+    p.add_argument("--symptom", help="Observed behavior or error (maximum 500 characters)")
+    p.add_argument("--expected", help="Expected behavior (maximum 500 characters)")
+    p.add_argument("--recent-change", help="Relevant recent change (maximum 500 characters)")
 
     # -- vendor --
     p = sub.add_parser("vendor", aliases=["v"], parents=[shared], help="Vendor config helpers",
@@ -5852,38 +6844,63 @@ def _dispatch_doctor(args):
     if args.timeout <= 0:
         raise ValueError("Timeout must be greater than zero")
     _validate_log_options(args.lines, args.since)
+    if args.raw_logs and args.logs == "none":
+        raise ValueError("--raw-logs requires an explicit --logs selection")
     operation = "system" if args.op == "general" else args.op
+    nginx_probe_flags = bool(args.url or args.host_header or args.sni or args.follow_redirects or args.insecure or args.config)
+    if operation != "nginx" and nginx_probe_flags:
+        raise ValueError("--url, --host-header, --sni, --follow-redirects, --insecure, and --config apply only to doctor nginx")
+    if operation not in {"system", "disk"} and args.du:
+        raise ValueError("--du applies only to doctor system or doctor disk")
     if operation == "system":
-        if args.logs not in {"none", "system", "service", "all"}:
-            raise ValueError("doctor system supports --logs none, system, service, or all")
+        if args.logs not in {"none", "system", "all"}:
+            raise ValueError("doctor system supports --logs none, system, or all")
         result = system_diagnostic(
             path=args.target or "/", include_du=args.du,
             include_logs=args.logs != "none", lines=args.lines, since=args.since,
-            raw_logs=args.raw_logs, timeout=args.timeout,
+            raw_logs=args.raw_logs, timeout=args.timeout, symptom=args.symptom,
+            expected=args.expected, recent_change=args.recent_change,
         )
     elif operation == "disk":
         if args.logs != "none" or args.raw_logs:
             raise ValueError("doctor disk does not read logs")
-        result = disk_diagnostic(args.target or "/", include_du=args.du, timeout=args.timeout)
+        result = disk_diagnostic(
+            args.target or "/", include_du=args.du, timeout=args.timeout,
+            symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
+        )
     elif operation == "service":
         if not args.target:
             raise ValueError("Usage: doctor service NAME [--logs service]")
-        if args.logs not in {"none", "system", "service", "all"}:
-            raise ValueError("doctor service supports --logs none, system, service, or all")
+        if args.logs not in {"none", "service", "all"}:
+            raise ValueError("doctor service supports --logs none, service, or all")
         result = service_diagnostic(
             args.target, include_logs=args.logs != "none", lines=args.lines,
             since=args.since, raw_logs=args.raw_logs, timeout=args.timeout,
+            symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
         )
     elif operation == "network":
         if args.logs != "none" or args.raw_logs:
             raise ValueError("doctor network does not read logs")
-        result = network_diagnostic(args.target or None, port=args.port, timeout=args.timeout)
+        result = network_diagnostic(
+            args.target or None, port=args.port, timeout=args.timeout,
+            symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
+        )
     elif operation == "nginx":
+        if args.logs == "system":
+            raise ValueError("doctor nginx supports --logs none, service, error, access, or all")
+        if (args.host_header or args.sni or args.follow_redirects or args.insecure) and not args.url:
+            raise ValueError("--host-header, --sni, --follow-redirects, and --insecure require --url")
+        if args.sni and urllib.parse.urlsplit(args.url).scheme != "https":
+            raise ValueError("--sni requires an HTTPS --url")
+        if args.insecure and urllib.parse.urlsplit(args.url).scheme != "https":
+            raise ValueError("--insecure requires an HTTPS --url")
         result = nginx_diagnostic(
             service_name=args.target or "nginx", binary=args.binary,
             config=args.config, url=args.url, host_header=args.host_header,
             log_mode=args.logs, lines=args.lines, since=args.since,
-            raw_logs=args.raw_logs, timeout=args.timeout,
+            raw_logs=args.raw_logs, timeout=args.timeout, sni=args.sni,
+            follow_redirects=args.follow_redirects, verify_tls=not args.insecure,
+            symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
         )
     else:
         raise ValueError(f"Unsupported diagnostic: {operation}")

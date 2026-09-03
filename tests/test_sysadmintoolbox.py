@@ -902,6 +902,126 @@ class NetworkTests(unittest.TestCase):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_diagnostic_http_probe_separates_connect_host_host_header_and_sni(self):
+        class FakeSocket:
+            def __init__(self):
+                self.request = b""
+
+            def settimeout(self, _timeout):
+                pass
+
+            def sendall(self, value):
+                self.request += value
+
+            def cipher(self):
+                return ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+
+            def version(self):
+                return "TLSv1.3"
+
+            def getpeercert(self):
+                return {"subjectAltName": (("DNS", "app.example.com"),)}
+
+            def close(self):
+                pass
+
+        class FakeContext:
+            def __init__(self):
+                self.server_hostname = None
+
+            def wrap_socket(self, sock, server_hostname=None):
+                self.server_hostname = server_hostname
+                return sock
+
+        class FakeResponse:
+            status = 200
+            reason = "OK"
+
+            def __init__(self, _sock):
+                pass
+
+            def begin(self):
+                pass
+
+            def getheaders(self):
+                return [("Server", "nginx")]
+
+        sock = FakeSocket()
+        context = FakeContext()
+        with patch.object(sat.socket, "create_connection", return_value=sock) as connect, \
+                patch.object(sat.ssl, "create_default_context", return_value=context), \
+                patch.object(sat.http.client, "HTTPResponse", FakeResponse):
+            result = sat._http_status_probe(
+                "https://127.0.0.1:8443/health", "app.example.com", 1,
+            )
+        connect.assert_called_once_with(("127.0.0.1", 8443), timeout=1)
+        self.assertEqual(context.server_hostname, "app.example.com")
+        self.assertIn(b"Host: app.example.com\r\n", sock.request)
+        self.assertEqual(result["tls"]["server_name"], "app.example.com")
+        self.assertEqual(result["proxy_policy"], "direct")
+
+    def test_diagnostic_http_redirects_are_opt_in(self):
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                seen.append((self.path, self.headers.get("Host")))
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "/final")
+                else:
+                    self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, _format, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/start"
+        try:
+            stopped = sat._http_status_probe(url, "app.example.com", 1)
+            followed = sat._http_status_probe(url, "app.example.com", 1, follow_redirects=True)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+        self.assertEqual(stopped["status_code"], 302)
+        self.assertFalse(stopped["redirected"])
+        self.assertEqual(followed["status_code"], 204)
+        self.assertTrue(followed["redirected"])
+        self.assertEqual(len(followed["redirect_chain"]), 2)
+        self.assertEqual(seen[0], ("/start", "app.example.com"))
+        self.assertEqual(seen[-1][0], "/final")
+
+    def test_diagnostic_http_rejects_invalid_redirect_target_and_authority_port(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                self.send_response(302)
+                self.send_header("Location", "file:///etc/passwd")
+                self.end_headers()
+
+            def log_message(self, _format, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = sat._http_status_probe(
+                f"http://127.0.0.1:{server.server_port}/", None, 1,
+                follow_redirects=True,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("credential-free HTTP/HTTPS", result["error"])
+        with self.assertRaises(ValueError):
+            sat._host_from_authority("example.com:70000")
+
     def test_log_redaction_covers_headers_queries_and_jwts(self):
         line = (
             'GET /?token=secret&name=test HTTP/1.1 Authorization: Bearer abc '
@@ -966,6 +1086,38 @@ class DiagnosticTests(unittest.TestCase):
         self.assertNotIn("secret", result["journal"][0])
         self.assertTrue(result["logs_redacted"])
 
+    @patch.object(sat, "_process_matches", return_value=[{"pid": 12, "command": "nginx: worker process"}])
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat, "_service_manager", return_value="openrc")
+    def test_service_diagnostic_reconciles_unmanaged_running_process(self, _manager, command, _processes):
+        command.return_value = {
+            "available": True, "ok": False, "returncode": 1, "stdout": "", "stderr": "not found",
+            "error": "not found", "elapsed_ms": 1,
+        }
+        with patch.object(sat.platform, "system", return_value="Linux"):
+            result = sat.service_diagnostic("nginx")
+        codes = {item["code"] for item in result["findings"]}
+        self.assertEqual(result["status"], "warning")
+        self.assertIn("service_manager_process_mismatch", codes)
+        self.assertNotIn("service_inactive", codes)
+
+    @patch.object(sat, "_process_matches", return_value=[])
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat, "_service_manager", return_value="systemd")
+    def test_service_diagnostic_accepts_manager_pid_without_exact_name_match(self, _manager, command, _processes):
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=321\nExecMainStatus=0\n",
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        result = sat.service_diagnostic("example-wrapper")
+        process_step = next(
+            step for step in result["methodology"]["steps"] if step["id"] == "process"
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(process_step["status"], "passed")
+        self.assertIn("321", process_step["summary"])
+
     @patch.object(sat, "tcp_probe", return_value={"status": "failed", "error": "refused"})
     @patch.object(sat, "resolve_all", return_value={"status": "ok", "addresses": [{"address": "192.0.2.1"}]})
     @patch.object(sat, "_listening_sockets", return_value={"available": True, "listeners": []})
@@ -980,6 +1132,34 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn("default_route_missing", codes)
         self.assertIn("dns_servers_missing", codes)
         self.assertIn("probe_tcp_failed", codes)
+
+    @patch.object(sat, "tcp_probe")
+    @patch.object(sat, "_route_to_address")
+    @patch.object(sat, "resolve_all", return_value={"status": "failed", "addresses": [], "error": "not found"})
+    @patch.object(sat, "_listening_sockets", return_value={"available": True, "listeners": []})
+    @patch.object(sat, "local_network_inventory")
+    def test_network_diagnostic_stops_after_dns_failure(
+        self, inventory, _listeners, _resolve, route, tcp,
+    ):
+        inventory.return_value = {
+            "interfaces": [{
+                "name": "eth0", "state": "UP",
+                "addresses": [{"family": "inet", "address": "192.0.2.10", "scope": "global"}],
+            }],
+            "default_routes": [{"destination": "default", "gateway": "192.0.2.1"}],
+            "dns_servers": ["192.0.2.53"], "errors": [],
+        }
+        result = sat.network_diagnostic("missing.example", port=443)
+        self.assertEqual(result["checks"]["tcp"]["status"], "skipped")
+        route.assert_not_called()
+        tcp.assert_not_called()
+        self.assertEqual(
+            [step["id"] for step in result["methodology"]["steps"]],
+            [
+                "context", "link", "addressing", "local_routing", "dns",
+                "target_route", "transport", "application",
+            ],
+        )
 
     def test_nginx_configuration_parser_extracts_only_diagnostic_metadata(self):
         configuration = """# configuration file /etc/nginx/nginx.conf:
@@ -1011,6 +1191,28 @@ http {
         self.assertEqual(result["paths"]["aliases"], ["/srv/media"])
         self.assertEqual(result["server_names"], ["example.com www.example.com"])
         self.assertNotIn("ssl_certificate_key", result)
+
+    def test_nginx_listener_parser_covers_default_port_and_unix_socket(self):
+        configuration = """# configuration file /etc/nginx/nginx.conf:
+server {
+  listen 127.0.0.1;
+  listen unix:/run/nginx/app.sock;
+  server_name app.example.com;
+}
+"""
+        result = sat._parse_nginx_configuration(
+            configuration, {"configure_arguments": {"prefix": "/etc/nginx"}},
+        )
+        self.assertEqual(result["listen_ports"], [80])
+        self.assertEqual(result["unix_sockets"], ["/run/nginx/app.sock"])
+        self.assertFalse(result["implicit_listen"])
+        self.assertEqual([item["family"] for item in result["listeners"]], ["ip", "unix"])
+
+        implicit = sat._parse_nginx_configuration(
+            "server { server_name default.example; }", {"configure_arguments": {}},
+        )
+        self.assertTrue(implicit["implicit_listen"])
+        self.assertEqual(implicit["implicit_port_candidates"], [80, 8000])
 
     def test_nginx_endpoint_and_url_redaction_remove_credentials(self):
         self.assertEqual(
@@ -1100,6 +1302,13 @@ root /srv/www;
         self.assertEqual(result["configuration"]["listen_ports"], [8080])
         self.assertEqual(result["build"]["version"], "1.26.2")
         self.assertTrue(result["logs_redacted"])
+        self.assertEqual(
+            [step["id"] for step in result["methodology"]["steps"]],
+            [
+                "context", "host_prerequisites", "runtime", "service_logs",
+                "configuration", "application_logs", "listeners", "application", "path_access",
+            ],
+        )
 
     @patch.object(sat, "network_diagnostic", return_value={"status": "ok", "findings": []})
     @patch.object(sat, "disk_diagnostic", return_value={"status": "ok", "findings": []})
@@ -1244,6 +1453,32 @@ class OutputAndCliTests(unittest.TestCase):
         self.assertIn(alias.returncode, {0, 1}, alias.stderr)
         self.assertEqual(json.loads(direct.stdout)["path"], directory)
         self.assertEqual(json.loads(alias.stdout)["path"], directory)
+
+    def test_doctor_rejects_cross_scope_options(self):
+        cases = (
+            ("doctor", "system", "--logs", "service"),
+            ("doctor", "service", "nginx", "--logs", "system"),
+            ("doctor", "network", "localhost", "--url", "http://127.0.0.1"),
+            ("doctor", "nginx", "--sni", "app.example.com"),
+            ("doctor", "nginx", "--url", "http://127.0.0.1", "--insecure"),
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                process = self.run_cli(*arguments)
+                self.assertEqual(process.returncode, 1)
+                self.assertIn("Error:", process.stderr)
+
+    def test_doctor_records_operator_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process = self.run_cli(
+                "doctor", "disk", directory, "--symptom", "writes fail",
+                "--expected", "writes succeed", "--recent-change", "new mount", "--json",
+            )
+        self.assertIn(process.returncode, {0, 1}, process.stderr)
+        result = json.loads(process.stdout)
+        self.assertEqual(result["context"]["symptom"], "writes fail")
+        self.assertEqual(result["context"]["expected"], "writes succeed")
+        self.assertEqual(result["methodology"]["steps"][0]["status"], "passed")
 
     def test_legacy_cheatsheet_flag(self):
         current = self.run_cli("cs", "vlan")
