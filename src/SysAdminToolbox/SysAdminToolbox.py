@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 3.3.2
+Version  : 4.0.0
 License  : MIT
 
 Repository:
@@ -16,6 +16,8 @@ License details:
 """
 
 import argparse
+import csv
+import hashlib
 import ipaddress
 import itertools
 import json
@@ -28,17 +30,22 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "3.3.2"
+__version__ = "4.0.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
+MAX_BATCH_TARGETS = 10000
+DEFAULT_IEEE_OUI_URL = "https://standards-oui.ieee.org/oui/oui.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +178,100 @@ def output(data: Any, label: str = "result", file=None) -> None:
         print(_format_human(data, indent=1), file=destination)
     else:
         print(data, file=destination)
+
+
+def _flatten_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten nested values into JSON strings for stable CSV output."""
+    flattened: Dict[str, Any] = {}
+    for key, value in record.items():
+        if isinstance(value, (dict, list, tuple)):
+            flattened[key] = json.dumps(value, sort_keys=True, default=str)
+        elif value is None:
+            flattened[key] = ""
+        else:
+            flattened[key] = value
+    return flattened
+
+
+def emit_records(
+    records: List[Dict[str, Any]],
+    output_format: str = "text",
+    label: str = "results",
+    file=None,
+) -> None:
+    """Emit batch records as text, JSON, NDJSON, or CSV."""
+    destination = file or sys.stdout
+    fmt = output_format.lower()
+    if fmt not in {"text", "json", "ndjson", "csv"}:
+        raise ValueError("Output format must be text, json, ndjson, or csv")
+    if fmt == "json":
+        print(json.dumps(records, indent=2, default=str), file=destination)
+    elif fmt == "ndjson":
+        for record in records:
+            print(json.dumps(record, separators=(",", ":"), default=str), file=destination)
+    elif fmt == "csv":
+        flattened = [_flatten_record(record) for record in records]
+        fieldnames = sorted({key for record in flattened for key in record})
+        if not fieldnames:
+            return
+        writer = csv.DictWriter(destination, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(flattened)
+    else:
+        output(records, label=label, file=destination)
+
+
+def _read_text_source(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    path = Path(source).expanduser()
+    if not path.is_file():
+        raise ValueError(f"Input file not found: {source}")
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Cannot read input file '{source}': {exc}")
+
+
+def read_targets(source: str) -> List[str]:
+    """Read unique targets from a UTF-8 file or stdin, preserving order."""
+    targets = []
+    seen = set()
+    for raw_line in _read_text_source(source).splitlines():
+        value = raw_line.strip()
+        if not value or value.startswith("#"):
+            continue
+        if value not in seen:
+            seen.add(value)
+            targets.append(value)
+    if not targets:
+        raise ValueError("Input contains no targets")
+    if len(targets) > MAX_BATCH_TARGETS:
+        raise ValueError(f"Input exceeds {MAX_BATCH_TARGETS} unique targets")
+    return targets
+
+
+def load_subnet_inventory(source: str) -> Dict[str, Any]:
+    """Load an IPAM inventory from JSON, CSV, or one-CIDR-per-line text."""
+    text = _read_text_source(source)
+    suffix = Path(source).suffix.lower() if source != "-" else ""
+    if suffix == ".json" or text.lstrip().startswith(("[", "{")):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON inventory: {exc}")
+        if isinstance(data, list):
+            return {"parent": None, "allocations": data}
+        if isinstance(data, dict) and isinstance(data.get("allocations"), list):
+            return {"parent": data.get("parent"), "allocations": data["allocations"]}
+        raise ValueError("JSON inventory must be a list or contain an allocations list")
+    if suffix == ".csv" or (text.splitlines() and "," in text.splitlines()[0]):
+        reader = csv.DictReader(text.splitlines())
+        if not reader.fieldnames or "network" not in reader.fieldnames:
+            raise ValueError("CSV inventory requires a network column")
+        return {"parent": None, "allocations": [dict(row) for row in reader]}
+    entries = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    return {"parent": None, "allocations": entries}
 
 
 def colored_subnet_output(details: dict) -> str:
@@ -454,6 +555,7 @@ def ipv4_info(value: str) -> Dict[str, Any]:
         "binary": ip_to_binary(str(address)),
         "ipv4_mapped_ipv6": f"::ffff:{address}",
         "reverse_pointer": address.reverse_pointer,
+        "classification": classify_ip(str(address)),
     }
     if '/' in value:
         result.update({
@@ -466,6 +568,102 @@ def ipv4_info(value: str) -> Dict[str, Any]:
     return result
 
 
+_IPV4_SPECIAL_PURPOSE = (
+    ("255.255.255.255/32", "limited broadcast", "link", False, "current", "RFC 919"),
+    ("0.0.0.0/32", "unspecified", "host", False, "current", "RFC 1122"),
+    ("192.0.0.9/32", "Port Control Protocol anycast", "global", True, "current", "RFC 7723"),
+    ("192.0.0.10/32", "TURN anycast", "global", True, "current", "RFC 8155"),
+    ("0.0.0.0/8", "this network", "host", False, "current", "RFC 1122"),
+    ("10.0.0.0/8", "private-use", "private", False, "current", "RFC 1918"),
+    ("100.64.0.0/10", "shared address space (CGNAT)", "shared", False, "current", "RFC 6598"),
+    ("127.0.0.0/8", "loopback", "host", False, "current", "RFC 1122"),
+    ("169.254.0.0/16", "link-local", "link", False, "current", "RFC 3927"),
+    ("172.16.0.0/12", "private-use", "private", False, "current", "RFC 1918"),
+    ("192.0.0.0/24", "IETF protocol assignments", "special", False, "current", "RFC 6890"),
+    ("192.0.0.0/29", "IPv4 service continuity prefix", "special", False, "current", "RFC 7335"),
+    ("192.0.0.8/32", "IPv4 dummy address", "host", False, "current", "RFC 7600"),
+    ("192.0.2.0/24", "documentation (TEST-NET-1)", "documentation", False, "current", "RFC 5737"),
+    ("192.0.0.170/32", "NAT64/DNS64 discovery", "special", False, "current", "RFC 8880 / RFC 7050"),
+    ("192.0.0.171/32", "NAT64/DNS64 discovery", "special", False, "current", "RFC 8880 / RFC 7050"),
+    ("192.31.196.0/24", "AS112-v4", "global", True, "current", "RFC 7535"),
+    ("192.52.193.0/24", "Automatic Multicast Tunneling", "global", True, "current", "RFC 7450"),
+    ("192.88.99.0/24", "deprecated 6to4 relay anycast", "special", None, "legacy", "RFC 7526"),
+    ("192.88.99.2/32", "6a44 relay anycast", "special", False, "current", "RFC 6751"),
+    ("192.168.0.0/16", "private-use", "private", False, "current", "RFC 1918"),
+    ("192.175.48.0/24", "direct delegation AS112 service", "global", True, "current", "RFC 7534"),
+    ("198.18.0.0/15", "benchmarking", "benchmark", False, "current", "RFC 2544"),
+    ("198.51.100.0/24", "documentation (TEST-NET-2)", "documentation", False, "current", "RFC 5737"),
+    ("203.0.113.0/24", "documentation (TEST-NET-3)", "documentation", False, "current", "RFC 5737"),
+    ("224.0.0.0/4", "multicast", "multicast", False, "current", "RFC 5771"),
+    ("240.0.0.0/4", "reserved", "reserved", False, "current", "RFC 1112"),
+)
+
+_IPV6_SPECIAL_PURPOSE = (
+    ("::/128", "unspecified", "host", False, "current", "RFC 4291"),
+    ("::1/128", "loopback", "host", False, "current", "RFC 4291"),
+    ("::ffff:0:0/96", "IPv4-mapped", "host", False, "current", "RFC 4291"),
+    ("64:ff9b::/96", "IPv4/IPv6 translation", "global", True, "current", "RFC 6052"),
+    ("64:ff9b:1::/48", "local-use IPv4/IPv6 translation", "private", False, "current", "RFC 8215"),
+    ("100::/64", "discard-only", "special", False, "current", "RFC 6666"),
+    ("100:0:0:1::/64", "dummy IPv6 prefix", "special", False, "current", "RFC 9780"),
+    ("2001::/23", "IETF protocol assignments", "special", False, "current", "RFC 2928"),
+    ("2001::/32", "Teredo", "transition", None, "legacy", "RFC 4380"),
+    ("2001:1::1/128", "Port Control Protocol anycast", "global", True, "current", "RFC 7723"),
+    ("2001:1::2/128", "TURN anycast", "global", True, "current", "RFC 8155"),
+    ("2001:1::3/128", "DNS-SD service registration anycast", "global", True, "current", "RFC 9665"),
+    ("2001:2::/48", "benchmarking", "benchmark", False, "current", "RFC 5180"),
+    ("2001:3::/32", "Automatic Multicast Tunneling", "global", True, "current", "RFC 7450"),
+    ("2001:4:112::/48", "AS112-v6", "global", True, "current", "RFC 7535"),
+    ("2001:10::/28", "deprecated ORCHID", "special", False, "legacy", "RFC 4843"),
+    ("2001:20::/28", "ORCHIDv2", "special", True, "current", "RFC 7343"),
+    ("2001:30::/28", "Drone Remote ID protocol entity tags", "special", True, "current", "RFC 9374"),
+    ("2001:db8::/32", "documentation", "documentation", False, "current", "RFC 3849"),
+    ("2002::/16", "6to4", "transition", None, "legacy", "RFC 3056"),
+    ("2620:4f:8000::/48", "direct delegation AS112 service", "global", True, "current", "RFC 7534"),
+    ("3fff::/20", "documentation", "documentation", False, "current", "RFC 9637"),
+    ("5f00::/20", "segment routing services", "special", False, "current", "RFC 9602"),
+    ("fc00::/7", "unique-local", "private", False, "current", "RFC 4193"),
+    ("fe80::/10", "link-local", "link", False, "current", "RFC 4291"),
+    ("fec0::/10", "site-local", "private", False, "legacy", "RFC 3879"),
+    ("ff00::/8", "multicast", "multicast", False, "current", "RFC 4291"),
+)
+
+
+def classify_ip(value: str) -> Dict[str, Any]:
+    """Classify an address consistently across supported Python versions."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid IP address: '{value}' ({exc})")
+    registry = _IPV4_SPECIAL_PURPOSE if address.version == 4 else _IPV6_SPECIAL_PURPOSE
+    matches = []
+    for prefix, name, scope, globally_reachable, status, reference in registry:
+        network = ipaddress.ip_network(prefix)
+        if address in network:
+            matches.append((network.prefixlen, prefix, name, scope, globally_reachable, status, reference))
+    matched_prefix: Optional[str]
+    if matches:
+        _, matched_prefix, name, scope, globally_reachable, status, reference = max(matches)
+    else:
+        matched_prefix = None
+        name = "global unicast"
+        scope = "global"
+        globally_reachable = True
+        status = "current"
+        reference = "IANA special-purpose address registries"
+    return {
+        "address": str(address),
+        "version": address.version,
+        "name": name,
+        "scope": scope,
+        "globally_reachable": globally_reachable,
+        "status": status,
+        "matched_prefix": matched_prefix,
+        "reference": reference,
+        "reverse_pointer": address.reverse_pointer,
+    }
+
+
 def ipv4_range_to_cidrs(first: str, last: str) -> List[str]:
     """Return the exact minimal CIDR set covering an inclusive IPv4 range."""
     try:
@@ -476,6 +674,208 @@ def ipv4_range_to_cidrs(first: str, last: str) -> List[str]:
     if int(start) > int(end):
         raise ValueError("First IPv4 address must not exceed the last address")
     return [str(net) for net in ipaddress.summarize_address_range(start, end)]
+
+
+def subnet_contains(container: str, candidate: str) -> Dict[str, Any]:
+    """Return whether a network contains an address or another network."""
+    try:
+        parent = ipaddress.ip_network(container, strict=False)
+        if "/" in candidate:
+            child: Any = ipaddress.ip_network(candidate, strict=False)
+            if child.version != parent.version:
+                raise ValueError("Cannot compare IPv4 and IPv6 values")
+            contains = child.subnet_of(parent)
+            normalized = str(child)
+            kind = "network"
+        else:
+            address = ipaddress.ip_address(candidate)
+            if address.version != parent.version:
+                raise ValueError("Cannot compare IPv4 and IPv6 values")
+            contains = address in parent
+            normalized = str(address)
+            kind = "address"
+    except ValueError as exc:
+        if str(exc).startswith("Cannot compare"):
+            raise
+        raise ValueError(f"Invalid subnet containment input: {exc}")
+    return {
+        "container": str(parent),
+        "candidate": normalized,
+        "candidate_type": kind,
+        "contains": contains,
+    }
+
+
+def subnet_exclude(container: str, excluded: str) -> List[str]:
+    """Return the minimal CIDRs left after excluding one contained network."""
+    try:
+        parent: Any = ipaddress.ip_network(container, strict=False)
+        child: Any = ipaddress.ip_network(excluded, strict=False)
+    except ValueError as exc:
+        raise ValueError(f"Invalid subnet exclusion input: {exc}")
+    if child.version != parent.version:
+        raise ValueError("Cannot mix IPv4 and IPv6 networks")
+    if not child.subnet_of(parent):
+        raise ValueError(f"Excluded network {child} is not contained in {parent}")
+    if child == parent:
+        return []
+    return [str(network) for network in parent.address_exclude(child)]
+
+
+def subnet_nth(network: str, index: int) -> Dict[str, Any]:
+    """Return an indexed address without materializing the network."""
+    try:
+        net = ipaddress.ip_network(network, strict=False)
+    except ValueError as exc:
+        raise ValueError(f"Invalid network: '{network}' ({exc})")
+    if index < 0 or index >= net.num_addresses:
+        raise ValueError(
+            f"Address index must be between 0 and {net.num_addresses - 1}"
+        )
+    address = net.network_address + index
+    if index == 0:
+        role = "network"
+    elif net.version == 4 and index == net.num_addresses - 1 and net.prefixlen < 31:
+        role = "broadcast"
+    elif net.version == 4 and net.prefixlen == 31:
+        role = "point-to-point endpoint"
+    elif net.version == 4 and net.prefixlen == 32:
+        role = "host"
+    elif net.version == 4:
+        role = "host"
+    else:
+        role = "address"
+    return {
+        "network": str(net),
+        "index": index,
+        "address": str(address),
+        "role": role,
+        "reverse_pointer": address.reverse_pointer,
+    }
+
+
+def subnet_audit(entries: List[Any], parent: Optional[str] = None) -> Dict[str, Any]:
+    """Audit named or unnamed network allocations for common IPAM mistakes."""
+    if len(entries) > MAX_BATCH_TARGETS:
+        raise ValueError(f"Subnet inventory exceeds {MAX_BATCH_TARGETS} entries")
+    allocations: List[Dict[str, Any]] = []
+    invalid: List[Dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        if isinstance(entry, str):
+            value, name, requested = entry, f"entry-{index + 1}", None
+        elif isinstance(entry, dict):
+            value = str(entry.get("network", ""))
+            name = str(entry.get("name") or f"entry-{index + 1}")
+            requested = entry.get("requested_hosts") or None
+        else:
+            invalid.append({"index": index, "value": repr(entry), "error": "expected string or object"})
+            continue
+        try:
+            network = ipaddress.ip_network(value, strict=False)
+            if requested is not None:
+                requested = int(requested)
+                if requested < 0:
+                    raise ValueError("requested_hosts must be zero or greater")
+            usable = network.num_addresses
+            if network.version == 4 and network.prefixlen < 31:
+                usable -= 2
+            allocations.append({
+                "name": name,
+                "input": value,
+                "network": str(network),
+                "version": network.version,
+                "addresses": network.num_addresses,
+                "usable_hosts": usable,
+                "requested_hosts": requested,
+                "unused_hosts": usable - requested if requested is not None else None,
+                "utilization_pct": round((requested / usable) * 100, 2) if requested is not None and usable else None,
+                "_object": network,
+            })
+        except ValueError as exc:
+            invalid.append({"index": index, "name": name, "value": value, "error": str(exc)})
+
+    duplicates: List[Dict[str, Any]] = []
+    seen: Dict[str, str] = {}
+    for allocation in allocations:
+        normalized = allocation["network"]
+        if normalized in seen:
+            duplicates.append({
+                "network": normalized,
+                "first": seen[normalized],
+                "duplicate": allocation["name"],
+            })
+        else:
+            seen[normalized] = allocation["name"]
+
+    overlaps: List[Dict[str, Any]] = []
+    for left_index, left in enumerate(allocations):
+        for right in allocations[left_index + 1:]:
+            left_net = left["_object"]
+            right_net = right["_object"]
+            if left_net.version == right_net.version and left_net != right_net and left_net.overlaps(right_net):
+                overlaps.append({
+                    "left": left["name"],
+                    "left_network": left["network"],
+                    "right": right["name"],
+                    "right_network": right["network"],
+                })
+
+    capacity_issues = [
+        {
+            "name": allocation["name"],
+            "network": allocation["network"],
+            "requested_hosts": allocation["requested_hosts"],
+            "usable_hosts": allocation["usable_hosts"],
+        }
+        for allocation in allocations
+        if allocation["requested_hosts"] is not None
+        and allocation["requested_hosts"] > allocation["usable_hosts"]
+    ]
+
+    parent_net: Any = None
+    outside_parent: List[Dict[str, str]] = []
+    free_networks: List[str] = []
+    if parent:
+        try:
+            parent_net = ipaddress.ip_network(parent, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"Invalid parent network: '{parent}' ({exc})")
+        contained_nets: List[Any] = []
+        for allocation in allocations:
+            network = allocation["_object"]
+            if network.version != parent_net.version or not network.subnet_of(parent_net):
+                outside_parent.append({"name": allocation["name"], "network": allocation["network"]})
+            else:
+                contained_nets.append(network)
+        remaining: List[Any] = [parent_net]
+        for used in ipaddress.collapse_addresses(contained_nets):
+            updated: List[Any] = []
+            for available in remaining:
+                if used.subnet_of(available):
+                    updated.extend(available.address_exclude(used))
+                elif not available.overlaps(used):
+                    updated.append(available)
+            remaining = updated
+        free_networks = [str(network) for network in remaining]
+
+    public_allocations = []
+    for allocation in allocations:
+        cleaned = dict(allocation)
+        cleaned.pop("_object")
+        public_allocations.append(cleaned)
+    status = "ok" if not (invalid or duplicates or overlaps or outside_parent or capacity_issues) else "issues"
+    return {
+        "status": status,
+        "parent": str(parent_net) if parent_net else None,
+        "allocation_count": len(public_allocations),
+        "allocations": public_allocations,
+        "invalid": invalid,
+        "duplicates": duplicates,
+        "overlaps": overlaps,
+        "capacity_issues": capacity_issues,
+        "outside_parent": outside_parent,
+        "free_networks": free_networks,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -848,10 +1248,135 @@ def _junos_acl_address(value: str) -> str:
     except (ipaddress.AddressValueError, ipaddress.NetmaskValueError) as exc:
         raise ValueError(f"Invalid Juniper ACL address: '{value}' ({exc})")
 
-def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
-                ports: Optional[List[str]] = None) -> str:
+
+PLATFORM_PROFILES: Dict[str, Dict[str, Any]] = {
+    "cisco-iosxe": {
+        "vendor": "cisco",
+        "software": "Cisco IOS XE",
+        "status": "current",
+        "version_pattern": r"^(?:1[6-9]|[2-9][0-9])(?:\.|$)",
+        "reference": "https://www.cisco.com/c/en/us/td/docs/switches/lan/c9000/lyr2-fwd/vlan/vlan-configuration-guide/configure-vlan-trunks.html",
+    },
+    "cisco-ios": {
+        "vendor": "cisco",
+        "software": "Cisco IOS on legacy Catalyst hardware",
+        "status": "legacy",
+        "version_pattern": r"^(?:12|15)(?:\.|$)",
+        "reference": "https://www.cisco.com/c/en/us/support/docs/lan-switching/8021q/8758-43.html",
+    },
+    "juniper-junos-els": {
+        "vendor": "juniper",
+        "software": "Juniper Junos ELS",
+        "status": "current",
+        "version_pattern": r"^[0-9]+(?:\.|R|$)",
+        "reference": "https://www.juniper.net/documentation/us/en/software/junos/multicast-l2/topics/topic-map/vlans.html",
+    },
+    "juniper-junos-legacy": {
+        "vendor": "juniper",
+        "software": "Juniper Junos non-ELS",
+        "status": "legacy",
+        "version_pattern": r"^[0-9]+(?:\.|R|$)",
+        "reference": "https://www.juniper.net/documentation/us/en/software/junos/multicast-l2/topics/topic-map/vlans.html",
+    },
+    "huawei-vrp": {
+        "vendor": "huawei",
+        "software": "Huawei VRP",
+        "status": "current",
+        "version_pattern": r"^V?[0-9]+(?:R|\.|$)",
+        "reference": "https://support.huawei.com/enterprise/en/doc/EDOC1100334321",
+    },
+}
+
+DEFAULT_PLATFORM = {
+    "cisco": "cisco-iosxe",
+    "juniper": "juniper-junos-els",
+    "huawei": "huawei-vrp",
+}
+
+
+def platform_profiles(include_legacy: bool = False) -> List[Dict[str, Any]]:
+    profiles = []
+    for name, profile in PLATFORM_PROFILES.items():
+        if profile["status"] == "legacy" and not include_legacy:
+            continue
+        profiles.append({"name": name, **{key: value for key, value in profile.items() if key != "version_pattern"}})
+    return profiles
+
+
+def _resolve_platform_profile(
+    vendor: str,
+    platform_name: Optional[str] = None,
+    software_version: Optional[str] = None,
+    allow_legacy: bool = False,
+) -> tuple:
+    normalized_vendor = vendor.lower()
+    selected = platform_name or DEFAULT_PLATFORM.get(normalized_vendor)
+    if not selected or selected not in PLATFORM_PROFILES:
+        available = ", ".join(sorted(PLATFORM_PROFILES))
+        raise ValueError(f"Unknown platform profile '{selected}'. Available: {available}")
+    profile = PLATFORM_PROFILES[selected]
+    if profile["vendor"] != normalized_vendor:
+        raise ValueError(
+            f"Platform profile '{selected}' belongs to {profile['vendor']}, not {vendor}"
+        )
+    if profile["status"] == "legacy" and not allow_legacy:
+        raise ValueError(f"Platform profile '{selected}' requires --legacy")
+    if software_version:
+        if not re.fullmatch(r"[A-Za-z0-9_.()/-]{1,40}", software_version):
+            raise ValueError("Invalid software version")
+        pattern = profile.get("version_pattern")
+        if pattern and not re.match(pattern, software_version, re.IGNORECASE):
+            raise ValueError(
+                f"Software version '{software_version}' does not match profile '{selected}'"
+            )
+    return selected, profile
+
+
+def _parse_vlan_list(value: Optional[str]) -> List[int]:
+    if not value:
+        return []
+    vlans = []
+    for item in value.split(","):
+        item = item.strip()
+        if "-" in item:
+            start_text, end_text = item.split("-", 1)
+            start, end = int(start_text), int(end_text)
+            if start > end:
+                raise ValueError(f"Invalid VLAN range: {item}")
+            candidates: Any = range(start, end + 1)
+        else:
+            candidates = [int(item)]
+        for candidate in candidates:
+            _validate_vlan_id(candidate)
+            if candidate not in vlans:
+                vlans.append(candidate)
+    return vlans
+
+
+def vlan_helper(
+    vendor: str,
+    vlan_id: int,
+    vlan_name: Optional[str] = None,
+    ports: Optional[List[str]] = None,
+    *,
+    platform_name: Optional[str] = None,
+    software_version: Optional[str] = None,
+    mode: str = "access",
+    allowed_vlans: Optional[str] = None,
+    native_vlan: Optional[int] = None,
+    allow_legacy: bool = False,
+) -> str:
     _validate_vlan_id(vlan_id)
     v = vendor.lower()
+    selected, _profile = _resolve_platform_profile(
+        v, platform_name, software_version, allow_legacy
+    )
+    mode = mode.lower()
+    if mode not in {"access", "trunk"}:
+        raise ValueError("VLAN mode must be access or trunk")
+    allowed = _parse_vlan_list(allowed_vlans)
+    if native_vlan is not None:
+        _validate_vlan_id(native_vlan)
     if vlan_name:
         _validate_config_name(vlan_name, "VLAN name", max_length=32)
     if ports:
@@ -866,13 +1391,18 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
         if vlan_name:
             lines.append(f" name {vlan_name}")
         port_range = ','.join(ports) if ports else 'Gi0/1-24'
-        lines += [
-            f"interface range {port_range}",
-            " switchport mode access",
-            f" switchport access vlan {vlan_id}",
-            "end",
-            "write memory",
-        ]
+        lines.append(f"interface range {port_range}")
+        if mode == "access":
+            lines.extend([" switchport mode access", " switchport nonegotiate", f" switchport access vlan {vlan_id}"])
+        else:
+            if selected == "cisco-ios":
+                lines.append(" switchport trunk encapsulation dot1q")
+            lines.extend([" switchport mode trunk", " switchport nonegotiate"])
+            if allowed:
+                lines.append(f" switchport trunk allowed vlan {allowed_vlans}")
+            if native_vlan is not None:
+                lines.append(f" switchport trunk native vlan {native_vlan}")
+        lines.extend(["end", "write memory"])
     elif v == 'juniper':
         name = vlan_name or f'vlan-{vlan_id}'
         interfaces = ports or ['ge-0/0/0']
@@ -880,10 +1410,16 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
             "configure",
             f"set vlans {name} vlan-id {vlan_id}",
         ]
-        lines.extend(
-            f"set interfaces {iface} unit 0 family ethernet-switching vlan members {name}"
-            for iface in interfaces
-        )
+        for iface in interfaces:
+            mode_keyword = "interface-mode" if selected == "juniper-junos-els" else "port-mode"
+            lines.append(f"set interfaces {iface} unit 0 family ethernet-switching {mode_keyword} {mode}")
+            if mode == "access":
+                lines.append(f"set interfaces {iface} unit 0 family ethernet-switching vlan members {name}")
+            else:
+                members = allowed_vlans or str(vlan_id)
+                lines.append(f"set interfaces {iface} unit 0 family ethernet-switching vlan members [ {members.replace(',', ' ')} ]")
+                if native_vlan is not None:
+                    lines.append(f"set interfaces {iface} native-vlan-id {native_vlan}")
         lines.append("commit and-quit")
     elif v == 'huawei':
         lines = [
@@ -894,13 +1430,16 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
             lines.append(f" name {vlan_name}")
         lines.append("quit")
         if ports:
-            for p in ports:
-                lines += [
-                    f"interface {p}",
-                    " port link-type access",
-                    f" port default vlan {vlan_id}",
-                    "quit",
-                ]
+            for port in ports:
+                lines.extend([f"interface {port}", f" port link-type {mode}"])
+                if mode == "access":
+                    lines.append(f" port default vlan {vlan_id}")
+                else:
+                    members = allowed_vlans or str(vlan_id)
+                    lines.append(f" port trunk allow-pass vlan {members.replace(',', ' ')}")
+                    if native_vlan is not None:
+                        lines.append(f" port trunk pvid vlan {native_vlan}")
+                lines.append("quit")
         lines.append("return")
     else:
         raise ValueError(
@@ -914,14 +1453,25 @@ def vlan_helper(vendor: str, vlan_id: int, vlan_name: Optional[str] = None,
 #  ACL helper
 # ---------------------------------------------------------------------------
 
-def acl_helper(vendor: str, acl_name: str, action: str, protocol: str,
-               src: str, dst: str,
-               src_port: Optional[int] = None,
-               dst_port: Optional[int] = None) -> str:
+def acl_helper(
+    vendor: str,
+    acl_name: str,
+    action: str,
+    protocol: str,
+    src: str,
+    dst: str,
+    src_port: Optional[int] = None,
+    dst_port: Optional[int] = None,
+    *,
+    platform_name: Optional[str] = None,
+    software_version: Optional[str] = None,
+    allow_legacy: bool = False,
+) -> str:
     if action.lower() not in ('permit', 'deny'):
         raise ValueError(f"Invalid action: '{action}' (must be 'permit' or 'deny')")
     _validate_config_name(acl_name, "ACL name")
     v = vendor.lower()
+    _resolve_platform_profile(v, platform_name, software_version, allow_legacy)
     action = action.lower()
     protocol = protocol.lower()
     _validate_config_name(protocol, "protocol", max_length=32)
@@ -1361,6 +1911,123 @@ NAT_CHEATSHEET = {
 }
 
 
+CHEATSHEET_COLLECTIONS = {
+    "vlan": VLAN_CHEATSHEET,
+    "acl": ACL_CHEATSHEET,
+    "huawei": HUAWEI_VLAN_CHEATSHEET,
+    "mikrotik": MIKROTIK_VLAN_CHEATSHEET,
+    "firewall": FIREWALL_CHEATSHEET,
+    "routing": ROUTING_CHEATSHEET,
+    "nat": NAT_CHEATSHEET,
+}
+
+CHEATSHEET_DEFAULT_METADATA = {
+    "vlan": {
+        "status": "current",
+        "platforms": ["cisco-iosxe"],
+        "software": "Cisco IOS XE",
+        "source": PLATFORM_PROFILES["cisco-iosxe"]["reference"],
+    },
+    "acl": {
+        "status": "current",
+        "platforms": ["cisco-iosxe"],
+        "software": "Cisco IOS XE",
+        "source": "https://www.cisco.com/c/en/us/support/docs/security/ios-firewall/23602-confaccesslists.html",
+    },
+    "huawei": {
+        "status": "current",
+        "platforms": ["huawei-vrp"],
+        "software": "Huawei VRP",
+        "source": PLATFORM_PROFILES["huawei-vrp"]["reference"],
+    },
+    "mikrotik": {
+        "status": "current",
+        "platforms": ["mikrotik-routeros"],
+        "software": "MikroTik RouterOS",
+        "source": "https://help.mikrotik.com/docs/spaces/ROS/pages/28606465/Bridge+VLAN+Table",
+    },
+    "firewall": {
+        "status": "current",
+        "platforms": ["linux", "paloalto-panos", "fortinet-fortios"],
+        "software": "Platform-specific",
+        "source": "https://netfilter.org/projects/nftables/manpage.html",
+    },
+    "routing": {
+        "status": "current",
+        "platforms": ["cisco-iosxe", "juniper-junos-els", "huawei-vrp"],
+        "software": "Platform-specific",
+        "source": "https://www.cisco.com/c/en/us/td/docs/ios-xml/ios/iproute_pi/configuration/xe-17/iri-xe-17-book.html",
+    },
+    "nat": {
+        "status": "current",
+        "platforms": ["cisco-iosxe", "linux"],
+        "software": "Platform-specific",
+        "source": "https://www.cisco.com/c/en/us/support/docs/ip/network-address-translation-nat/13772-12.html",
+    },
+}
+
+CHEATSHEET_SECTION_METADATA = {
+    ("vlan", "legacy_trunking"): {
+        "status": "legacy",
+        "platforms": ["cisco-ios"],
+        "software": "Cisco IOS on ISL-capable Catalyst hardware",
+        "replacement": "IEEE 802.1Q on a current platform",
+        "source": PLATFORM_PROFILES["cisco-ios"]["reference"],
+    },
+    ("vlan", "legacy_vtp"): {
+        "status": "legacy",
+        "platforms": ["cisco-ios", "cisco-iosxe"],
+        "software": "Cisco VTP versions 1 and 2",
+        "replacement": "VTP version 3 or transparent/off mode",
+        "source": "https://www.cisco.com/c/en/us/support/docs/lan-switching/vtp/98154-conf-vlan.html",
+    },
+}
+
+
+def render_cheatsheet(
+    sheet: str,
+    section: Optional[str] = None,
+    include_legacy: bool = False,
+    platform_name: Optional[str] = None,
+    show_sources: bool = False,
+) -> str:
+    """Render filtered reference entries with optional provenance metadata."""
+    if sheet not in CHEATSHEET_COLLECTIONS:
+        raise ValueError(f"Unknown cheatsheet: {sheet}")
+    entries = dict(CHEATSHEET_COLLECTIONS[sheet])
+    if sheet == "vlan" and include_legacy:
+        entries.update(VLAN_LEGACY_CHEATSHEET)
+    if section:
+        if section not in entries:
+            available = ", ".join(entries)
+            raise ValueError(f"Unknown section '{section}'. Available: {available}")
+        entries = {section: entries[section]}
+    rendered = []
+    for name, content in entries.items():
+        metadata = dict(CHEATSHEET_DEFAULT_METADATA[sheet])
+        metadata.update(CHEATSHEET_SECTION_METADATA.get((sheet, name), {}))
+        if platform_name and platform_name not in metadata.get("platforms", []):
+            continue
+        block = content
+        if show_sources:
+            block += (
+                "\n  Reference metadata:"
+                f"\n    status: {metadata['status']}"
+                f"\n    platforms: {', '.join(metadata.get('platforms', []))}"
+                f"\n    software: {metadata.get('software', 'unspecified')}"
+            )
+            if metadata.get("replacement"):
+                block += f"\n    replacement: {metadata['replacement']}"
+            if metadata.get("source"):
+                block += f"\n    source: {metadata['source']}"
+        rendered.append(block)
+    if not rendered:
+        raise ValueError(
+            f"No {sheet} reference entries match platform '{platform_name}'"
+        )
+    return "\n\n".join(rendered)
+
+
 def _cheatsheet_lookup(sheets: dict, section: Optional[str] = None) -> str:
     if section and section in sheets:
         return sheets[section]
@@ -1467,6 +2134,111 @@ def mac_vendor(mac: str) -> str:
         f"OUI: {oui.upper()} "
         f"(vendor lookup requires an external IEEE OUI database)"
     )
+
+
+def default_oui_database_path() -> Path:
+    cache_root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_root).expanduser() if cache_root else Path.home() / ".cache"
+    return base / "sysadmintoolbox" / "oui.csv"
+
+
+def update_oui_database(
+    destination: Optional[str] = None,
+    url: str = DEFAULT_IEEE_OUI_URL,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """Download the IEEE MA-L registry to an explicit local cache."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("OUI database URL must use HTTPS")
+    target = Path(destination).expanduser() if destination else default_oui_database_path()
+    request = urllib.request.Request(url, headers={"User-Agent": f"SysAdminToolbox/{__version__}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            content = response.read(50 * 1024 * 1024 + 1)
+    except (urllib.error.URLError, socket.timeout, OSError) as exc:
+        raise RuntimeError(f"Cannot download IEEE OUI database: {exc}")
+    if len(content) > 50 * 1024 * 1024:
+        raise RuntimeError("IEEE OUI database exceeds the 50 MiB safety limit")
+    try:
+        decoded = content.decode("utf-8-sig")
+        reader = csv.DictReader(decoded.splitlines())
+        fields = set(reader.fieldnames or [])
+        required = {"Assignment", "Organization Name"}
+        if not required.issubset(fields):
+            raise ValueError("downloaded file does not contain IEEE OUI columns")
+        count = sum(1 for row in reader if row.get("Assignment"))
+    except (UnicodeDecodeError, csv.Error, ValueError) as exc:
+        raise RuntimeError(f"Invalid IEEE OUI database: {exc}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, target)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(f"Cannot write OUI database '{target}': {exc}")
+    return {
+        "path": str(target),
+        "source": url,
+        "entries": count,
+        "bytes": len(content),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def load_oui_database(source: Optional[str] = None) -> Dict[str, Dict[str, str]]:
+    path = Path(source).expanduser() if source else default_oui_database_path()
+    if not path.is_file():
+        raise ValueError(
+            f"OUI database not found: {path}. Run 'mac oui-update' or provide --db."
+        )
+    database: Dict[str, Dict[str, str]] = {}
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            fields = set(reader.fieldnames or [])
+            if not {"Assignment", "Organization Name"}.issubset(fields):
+                raise ValueError("OUI database is missing Assignment or Organization Name")
+            for row in reader:
+                assignment = re.sub(r"[^0-9A-Fa-f]", "", row.get("Assignment", "")).upper()
+                if len(assignment) == 6:
+                    database[assignment] = {
+                        "organization": row.get("Organization Name", "").strip(),
+                        "address": row.get("Organization Address", "").strip(),
+                        "registry": row.get("Registry", "MA-L").strip() or "MA-L",
+                    }
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        raise ValueError(f"Cannot read OUI database '{path}': {exc}")
+    if not database:
+        raise ValueError(f"OUI database contains no valid MA-L assignments: {path}")
+    return database
+
+
+def mac_vendor_lookup(mac: str, database_path: Optional[str] = None) -> Dict[str, Any]:
+    bare = _strip_mac(mac)
+    oui = bare[:6].upper()
+    result: Dict[str, Any] = {
+        "mac": mac_normalize(mac),
+        "oui": ":".join(oui[index:index + 2] for index in range(0, 6, 2)),
+        "is_local": bool(int(bare[:2], 16) & 0x02),
+        "database": str(Path(database_path).expanduser() if database_path else default_oui_database_path()),
+    }
+    if result["is_local"]:
+        result.update({"found": False, "organization": None, "reason": "locally administered address"})
+        return result
+    database = load_oui_database(database_path)
+    match = database.get(oui)
+    if match:
+        result.update({"found": True, **match})
+    else:
+        result.update({"found": False, "organization": None, "reason": "OUI not present in database"})
+    return result
 
 
 def mac_info(mac: str) -> Dict[str, Any]:
@@ -1588,11 +2360,11 @@ def check_overlap(net1: str, net2: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _validate_host(host: str) -> str:
-    """Validate that *host* is a valid IPv4 address or hostname."""
+    """Validate that *host* is a valid IP address or hostname."""
     try:
-        ipaddress.IPv4Address(host)
+        ipaddress.ip_address(host)
         return host
-    except ipaddress.AddressValueError:
+    except ValueError:
         pass
     pattern = re.compile(
         r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*$'
@@ -2015,6 +2787,157 @@ def arp_scan() -> List[Dict[str, Any]]:
     return entries
 
 
+def _optional_command(command: List[str], timeout: int = 10) -> Dict[str, Any]:
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return {"ok": False, "error": f"command not found: {command[0]}", "stdout": ""}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"command timed out: {command[0]}", "stdout": ""}
+    return {
+        "ok": result.returncode == 0,
+        "error": result.stderr.strip() if result.returncode else None,
+        "stdout": result.stdout,
+    }
+
+
+def _resolver_addresses() -> List[str]:
+    path = Path("/etc/resolv.conf")
+    if not path.is_file():
+        return []
+    try:
+        values = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            match = re.match(r"\s*nameserver\s+(\S+)", line)
+            if match and match.group(1) not in values:
+                values.append(match.group(1))
+        return values
+    except OSError:
+        return []
+
+
+def local_network_inventory() -> Dict[str, Any]:
+    """Return a best-effort, cross-platform snapshot of local network state."""
+    system = platform.system().lower()
+    hostname = socket.gethostname()
+    result: Dict[str, Any] = {
+        "hostname": hostname,
+        "fqdn": socket.getfqdn(),
+        "platform": platform.platform(),
+        "interfaces": [],
+        "routes": [],
+        "dns_servers": _resolver_addresses() if system != "windows" else [],
+        "errors": [],
+    }
+    if system == "linux":
+        addresses = _optional_command(["ip", "-j", "address", "show"])
+        if addresses["ok"]:
+            try:
+                for interface in json.loads(addresses["stdout"]):
+                    result["interfaces"].append({
+                        "name": interface.get("ifname"),
+                        "state": interface.get("operstate"),
+                        "mtu": interface.get("mtu"),
+                        "mac": interface.get("address"),
+                        "addresses": [
+                            {
+                                "family": item.get("family"),
+                                "address": item.get("local"),
+                                "prefix_length": item.get("prefixlen"),
+                                "scope": item.get("scope"),
+                            }
+                            for item in interface.get("addr_info", [])
+                        ],
+                    })
+            except (json.JSONDecodeError, TypeError) as exc:
+                result["errors"].append(f"cannot parse ip address output: {exc}")
+        else:
+            result["errors"].append(addresses["error"])
+        routes = _optional_command(["ip", "-j", "route", "show"])
+        if routes["ok"]:
+            try:
+                result["routes"] = [
+                    {
+                        "destination": route.get("dst", "default"),
+                        "gateway": route.get("gateway"),
+                        "interface": route.get("dev"),
+                        "source": route.get("prefsrc"),
+                        "metric": route.get("metric"),
+                    }
+                    for route in json.loads(routes["stdout"])
+                ]
+            except (json.JSONDecodeError, TypeError) as exc:
+                result["errors"].append(f"cannot parse ip route output: {exc}")
+        else:
+            result["errors"].append(routes["error"])
+    elif system == "darwin":
+        interfaces = _optional_command(["ifconfig"])
+        current: Optional[Dict[str, Any]] = None
+        if interfaces["ok"]:
+            for line in interfaces["stdout"].splitlines():
+                header = re.match(r"^(\S+):\s+flags=.*mtu\s+(\d+)", line)
+                if header:
+                    current = {"name": header.group(1), "mtu": int(header.group(2)), "addresses": []}
+                    result["interfaces"].append(current)
+                    continue
+                if current is None:
+                    continue
+                mac = re.match(r"\s*ether\s+(\S+)", line)
+                address = re.match(r"\s*inet6?\s+(\S+)", line)
+                if mac:
+                    current["mac"] = mac.group(1)
+                elif address:
+                    value = address.group(1).split("%", 1)[0]
+                    current["addresses"].append({
+                        "family": "inet6" if ":" in value else "inet",
+                        "address": value,
+                    })
+        else:
+            result["errors"].append(interfaces["error"])
+        route = _optional_command(["route", "-n", "get", "default"])
+        if route["ok"]:
+            gateway = re.search(r"^\s*gateway:\s+(\S+)", route["stdout"], re.MULTILINE)
+            interface = re.search(r"^\s*interface:\s+(\S+)", route["stdout"], re.MULTILINE)
+            result["routes"].append({
+                "destination": "default",
+                "gateway": gateway.group(1) if gateway else None,
+                "interface": interface.group(1) if interface else None,
+            })
+    elif system == "windows":
+        configuration = _optional_command(["ipconfig", "/all"])
+        current = None
+        if configuration["ok"]:
+            for line in configuration["stdout"].splitlines():
+                header = re.match(r"^([^\s].*adapter\s+.+):\s*$", line, re.IGNORECASE)
+                if header:
+                    current = {"name": header.group(1).strip(), "addresses": []}
+                    result["interfaces"].append(current)
+                    continue
+                if current is None:
+                    continue
+                mac = re.search(r"Physical Address[^:]*:\s*([0-9A-Fa-f-]{17})", line)
+                address = re.search(r"IPv[46] Address[^:]*:\s*([^\s(]+)", line)
+                gateway = re.search(r"Default Gateway[^:]*:\s*(\S+)", line)
+                dns = re.search(r"DNS Servers[^:]*:\s*(\S+)", line)
+                if mac:
+                    current["mac"] = mac.group(1).replace("-", ":").lower()
+                elif address:
+                    value = address.group(1).split("%", 1)[0]
+                    current["addresses"].append({"family": "inet6" if ":" in value else "inet", "address": value})
+                if gateway:
+                    result["routes"].append({"destination": "default", "gateway": gateway.group(1), "interface": current["name"]})
+                if dns and dns.group(1) not in result["dns_servers"]:
+                    result["dns_servers"].append(dns.group(1))
+        else:
+            result["errors"].append(configuration["error"])
+    else:
+        result["errors"].append(f"unsupported platform: {system}")
+
+    result["interface_count"] = len(result["interfaces"])
+    result["default_routes"] = [route for route in result["routes"] if route.get("destination") == "default"]
+    return result
+
+
 def reverse_dns_sweep(network: str, timeout: int = 2, max_threads: int = 50) -> List[Dict[str, Any]]:
     net = ipaddress.ip_network(network, strict=False)
     if net.num_addresses > MAX_NETWORK_HOSTS + 2:
@@ -2086,12 +3009,19 @@ def _scan_single_port(host, port, timeout, grab):
     return result
 
 
-def tcp_port_scan_advanced(host: str, ports: List[int], timeout: float = 1.0,
-                           grab_banner: bool = False) -> List[Dict[str, Any]]:
+def tcp_port_scan_advanced(
+    host: str,
+    ports: List[int],
+    timeout: float = 1.0,
+    grab_banner: bool = False,
+    max_threads: int = 100,
+) -> List[Dict[str, Any]]:
     _validate_host(host)
     for p in ports:
         _validate_port(p)
-    workers = min(100, len(ports)) if ports else 1
+    if not 1 <= max_threads <= 256:
+        raise ValueError("Workers must be between 1 and 256")
+    workers = min(max_threads, len(ports)) if ports else 1
     results = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_scan_single_port, host, p, timeout, grab_banner): p for p in ports}
@@ -2129,7 +3059,12 @@ def udp_port_check(host: str, ports: List[int], timeout: float = 2.0) -> List[Di
     return results
 
 
-def scan_network_port(network: str, port: int, timeout: float = 1.0) -> List[Dict[str, Any]]:
+def scan_network_port(
+    network: str,
+    port: int,
+    timeout: float = 1.0,
+    max_threads: int = 100,
+) -> List[Dict[str, Any]]:
     _validate_port(port)
     try:
         net = ipaddress.IPv4Network(network, strict=False)
@@ -2142,7 +3077,9 @@ def scan_network_port(network: str, port: int, timeout: float = 1.0) -> List[Dic
         )
     hosts = [str(addr) for addr in net.hosts()]
     results = []
-    workers = min(100, len(hosts)) if hosts else 1
+    if not 1 <= max_threads <= 256:
+        raise ValueError("Workers must be between 1 and 256")
+    workers = min(max_threads, len(hosts)) if hosts else 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_scan_single_port, ip, port, timeout, False): ip for ip in hosts}
         for fut in as_completed(futures):
@@ -2178,7 +3115,10 @@ def generate_random_ports(minimum: int = 49152, maximum: int = 65535,
 def dns_lookup_type(domain: str, record_type: str = "A", server: Optional[str] = None,
                     timeout: int = 5) -> Dict[str, Any]:
     record_type = record_type.upper()
-    valid_types = {"A", "AAAA", "MX", "TXT", "NS", "CNAME", "SOA", "PTR", "SRV"}
+    valid_types = {
+        "A", "AAAA", "CAA", "CNAME", "DNSKEY", "DS", "MX", "NS",
+        "PTR", "RRSIG", "SOA", "SRV", "TXT",
+    }
     if record_type not in valid_types:
         return {"domain": domain, "type": record_type, "server": server or "default",
                 "records": [], "error": f"Unsupported type: {record_type}"}
@@ -2206,6 +3146,25 @@ def dns_lookup_type(domain: str, record_type: str = "A", server: Optional[str] =
         records = [l.strip() for l in raw.splitlines() if l.strip() and not l.strip().startswith(("Server:", "Address:", "#", "Non-authoritative"))]
         return {"domain": domain, "type": record_type, "server": server or "default", "records": records, "raw": raw}
     except FileNotFoundError:
+        if not server and record_type in {"A", "AAAA"}:
+            family = socket.AF_INET if record_type == "A" else socket.AF_INET6
+            try:
+                addresses = sorted({
+                    item[4][0]
+                    for item in socket.getaddrinfo(domain, None, family, socket.SOCK_STREAM)
+                })
+                return {
+                    "domain": domain,
+                    "type": record_type,
+                    "server": "system resolver",
+                    "records": [f"{domain}. 0 IN {record_type} {address}" for address in addresses],
+                    "fallback": "socket.getaddrinfo",
+                }
+            except (socket.gaierror, OSError) as exc:
+                return {
+                    "domain": domain, "type": record_type,
+                    "server": "system resolver", "records": [], "error": str(exc),
+                }
         return {"domain": domain, "type": record_type, "server": server or "default",
                 "records": [], "error": "Neither dig nor nslookup found"}
     except subprocess.TimeoutExpired:
@@ -2213,10 +3172,15 @@ def dns_lookup_type(domain: str, record_type: str = "A", server: Optional[str] =
                 "records": [], "error": "nslookup timed out"}
 
 
-def dns_compare(domain: str, servers: List[str], record_type: str = "A") -> Dict[str, Any]:
+def dns_compare(
+    domain: str,
+    servers: List[str],
+    record_type: str = "A",
+    timeout: int = 5,
+) -> Dict[str, Any]:
     results = {}
     for srv in servers:
-        lookup = dns_lookup_type(domain, record_type, server=srv)
+        lookup = dns_lookup_type(domain, record_type, server=srv, timeout=timeout)
         parsed = []
         for rec in lookup.get("records", []):
             parts = rec.split()
@@ -2225,7 +3189,11 @@ def dns_compare(domain: str, servers: List[str], record_type: str = "A") -> Dict
     return {"domain": domain, "type": record_type, "results": results}
 
 
-def dns_zone_transfer(domain: str, nameserver: Optional[str] = None) -> Dict[str, Any]:
+def dns_zone_transfer(
+    domain: str,
+    nameserver: Optional[str] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
     if not nameserver:
         ns_lookup = dns_lookup_type(domain, "NS")
         ns_records = ns_lookup.get("records", [])
@@ -2234,7 +3202,7 @@ def dns_zone_transfer(domain: str, nameserver: Optional[str] = None) -> Dict[str
         nameserver = ns_records[0].split()[-1].rstrip(".")
     try:
         result = subprocess.run(["dig", "axfr", domain, f"@{nameserver}"],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, timeout=timeout)
         records = [l.strip() for l in result.stdout.splitlines() if l.strip() and not l.startswith((";", "<<>>"))]
         success = len(records) > 0 and "Transfer failed" not in result.stdout and "refused" not in result.stdout.lower()
         return {"domain": domain, "nameserver": nameserver, "success": success, "records": records}
@@ -2244,6 +3212,136 @@ def dns_zone_transfer(domain: str, nameserver: Optional[str] = None) -> Dict[str
         return {"domain": domain, "nameserver": nameserver, "success": False, "records": [], "error": "Timed out"}
 
 
+def _dns_record_payloads(records: List[str]) -> List[str]:
+    payloads = []
+    for record in records:
+        parts = record.split()
+        payloads.append(" ".join(parts[4:]) if len(parts) >= 5 else record)
+    return payloads
+
+
+def dnssec_status(domain: str, timeout: int = 5) -> Dict[str, Any]:
+    """Report whether a validating resolver returned authenticated DNSSEC data."""
+    try:
+        result = subprocess.run(
+            ["dig", "+dnssec", "+comments", "+answer", domain, "SOA"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return {"status": "unavailable", "error": "dig not found"}
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "error": "dig timed out"}
+    raw = result.stdout
+    flags_match = re.search(r"flags:\s*([^;]+);", raw)
+    flags = flags_match.group(1).split() if flags_match else []
+    has_rrsig = bool(re.search(r"\sRRSIG\s", raw))
+    authenticated = "ad" in flags
+    return {
+        "status": "validated" if authenticated else ("signed" if has_rrsig else "unsigned"),
+        "authenticated_data": authenticated,
+        "rrsig_present": has_rrsig,
+        "resolver_flags": flags,
+    }
+
+
+def dns_health(
+    domain: str,
+    timeout: int = 5,
+    dkim_selector: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Collect resolution, delegation, DNSSEC, and mail DNS health signals."""
+    _validate_host(domain.rstrip("."))
+    normalized = domain.rstrip(".").lower()
+    record_types = ("A", "AAAA", "CNAME", "NS", "SOA", "MX", "CAA", "TXT")
+    records: Dict[str, Any] = {}
+    for record_type in record_types:
+        lookup = dns_lookup_type(normalized, record_type, timeout=timeout)
+        records[record_type] = {
+            "records": _dns_record_payloads(lookup.get("records", [])),
+            **({"error": lookup["error"]} if "error" in lookup else {}),
+        }
+
+    ns_values = [value.rstrip(".") for value in records["NS"]["records"]]
+    authoritative: Dict[str, Any] = {"nameserver": ns_values[0] if ns_values else None}
+    if ns_values:
+        authoritative_lookup = dns_lookup_type(
+            normalized, "NS", server=ns_values[0], timeout=timeout
+        )
+        authoritative_values = {
+            value.rstrip(".")
+            for value in _dns_record_payloads(authoritative_lookup.get("records", []))
+        }
+        recursive_values = set(ns_values)
+        authoritative.update({
+            "reachable": "error" not in authoritative_lookup,
+            "records": sorted(authoritative_values),
+            "consistent": bool(authoritative_values) and authoritative_values == recursive_values,
+        })
+        if "error" in authoritative_lookup:
+            authoritative["error"] = authoritative_lookup["error"]
+    else:
+        authoritative.update({"reachable": False, "records": [], "consistent": False})
+
+    cname_values = [value.rstrip(".").lower() for value in records["CNAME"]["records"]]
+    cname_loop = normalized in cname_values or len(cname_values) != len(set(cname_values))
+    txt_values = records["TXT"]["records"]
+    spf = [value for value in txt_values if "v=spf1" in value.lower()]
+    dmarc_lookup = dns_lookup_type(f"_dmarc.{normalized}", "TXT", timeout=timeout)
+    dmarc = [
+        value for value in _dns_record_payloads(dmarc_lookup.get("records", []))
+        if "v=dmarc1" in value.lower()
+    ]
+    mail: Dict[str, Any] = {
+        "mx": records["MX"]["records"],
+        "spf": spf,
+        "dmarc": dmarc,
+    }
+    if dkim_selector:
+        _validate_config_name(dkim_selector, "DKIM selector")
+        dkim_lookup = dns_lookup_type(
+            f"{dkim_selector}._domainkey.{normalized}", "TXT", timeout=timeout
+        )
+        mail["dkim_selector"] = dkim_selector
+        mail["dkim"] = _dns_record_payloads(dkim_lookup.get("records", []))
+
+    core_resolution = bool(records["A"]["records"] or records["AAAA"]["records"] or cname_values)
+    problems = []
+    if not core_resolution:
+        problems.append("no A, AAAA, or CNAME record")
+    if not records["NS"]["records"]:
+        if records["NS"].get("error"):
+            problems.append(f"NS check unavailable: {records['NS']['error']}")
+        else:
+            problems.append("no NS record")
+    if not records["SOA"]["records"]:
+        if records["SOA"].get("error"):
+            problems.append(f"SOA check unavailable: {records['SOA']['error']}")
+        else:
+            problems.append("no SOA record")
+    if cname_loop:
+        problems.append("possible CNAME loop")
+    if ns_values and not authoritative.get("reachable"):
+        problems.append("authoritative nameserver did not answer")
+    if authoritative.get("reachable") and not authoritative.get("consistent"):
+        problems.append("recursive and authoritative NS sets differ")
+    dnssec = dnssec_status(normalized, timeout)
+    if dnssec.get("status") in {"unavailable", "failed"}:
+        problems.append(f"DNSSEC check unavailable: {dnssec.get('error', 'unknown error')}")
+    status = "failed" if not core_resolution else ("warning" if problems else "ok")
+    return {
+        "domain": normalized,
+        "status": status,
+        "problems": problems,
+        "records": records,
+        "delegation": authoritative,
+        "dnssec": dnssec,
+        "mail": mail,
+        "cname_loop": cname_loop,
+    }
+
+
 # ---------------------------------------------------------------------------
 #  TLS cert check + HTTP headers
 # ---------------------------------------------------------------------------
@@ -2251,12 +3349,21 @@ def dns_zone_transfer(domain: str, nameserver: Optional[str] = None) -> Dict[str
 def cert_check(host: str, port: int = 443, timeout: int = 5) -> Dict[str, Any]:
     _validate_host(host)
     _validate_port(port)
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
     result: Dict[str, Any] = {"host": host, "port": port}
     try:
         ctx = ssl.create_default_context()
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as ssock:
                 cert = cast(Dict[str, Any], ssock.getpeercert() or {})
+                try:
+                    binary_certificate = ssock.getpeercert(binary_form=True)
+                except TypeError:
+                    binary_certificate = None
+                tls_version = getattr(ssock, "version", lambda: None)()
+                cipher_details = getattr(ssock, "cipher", lambda: None)()
+                alpn_protocol = getattr(ssock, "selected_alpn_protocol", lambda: None)()
         subject_cn = ""
         for rdn in cert.get("subject", ()):
             for attr_type, attr_value in rdn:
@@ -2269,27 +3376,40 @@ def cert_check(host: str, port: int = 443, timeout: int = 5) -> Dict[str, Any]:
                     issuer_org = attr_value
         not_before_str = cert.get("notBefore", "")
         not_after_str = cert.get("notAfter", "")
-        date_fmt = "%b %d %H:%M:%S %Y %Z"
+        now_utc = datetime.now(timezone.utc)
         try:
-            not_after_dt = datetime.strptime(not_after_str, date_fmt).replace(
-                tzinfo=timezone.utc
+            not_before_dt = datetime.fromtimestamp(
+                ssl.cert_time_to_seconds(not_before_str), timezone.utc
             )
-            now_utc = datetime.now(timezone.utc)
+            not_after_dt = datetime.fromtimestamp(
+                ssl.cert_time_to_seconds(not_after_str), timezone.utc
+            )
             days_remaining = (not_after_dt - now_utc).days
             expired = now_utc > not_after_dt
-        except ValueError:
+            not_yet_valid = now_utc < not_before_dt
+        except (TypeError, ValueError):
             days_remaining = None
             expired = None
+            not_yet_valid = None
         san_list = [f"{t}:{v}" for t, v in cert.get("subjectAltName", ())]
         result.update({
             "subject": subject_cn, "issuer": issuer_org,
             "serial_number": cert.get("serialNumber", ""),
             "not_before": not_before_str, "not_after": not_after_str,
             "days_remaining": days_remaining, "san": san_list,
-            "version": cert.get("version"), "expired": expired,
+            "certificate_version": cert.get("version"),
+            "expired": expired, "not_yet_valid": not_yet_valid,
+            "hostname_verified": True,
+            "tls_version": tls_version,
+            "cipher": cipher_details[0] if cipher_details else None,
+            "cipher_bits": cipher_details[2] if cipher_details else None,
+            "alpn_protocol": alpn_protocol,
+            "sha256_fingerprint": hashlib.sha256(binary_certificate).hexdigest().upper()
+            if binary_certificate else None,
         })
     except ssl.SSLCertVerificationError as e:
         result["error"] = f"SSL verification failed: {e}"
+        result["hostname_verified"] = False
     except ssl.SSLError as e:
         result["error"] = f"SSL error: {e}"
     except (socket.timeout, ConnectionRefusedError, socket.gaierror, OSError) as e:
@@ -2304,25 +3424,266 @@ def http_headers(url: str, timeout: int = 5) -> Dict[str, Any]:
     if not re.match(r'^https?://', url, re.IGNORECASE):
         return {"url": url, "error": "URL must use http:// or https://"}
     try:
+        started = time.monotonic()
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"SysAdminToolbox/{__version__}")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             result["status_code"] = resp.getcode()
+            result["final_url"] = resp.geturl()
             result["headers"] = dict(resp.headers)
             resp.read(1)
+        result["elapsed_ms"] = round((time.monotonic() - started) * 1000, 2)
     except urllib.error.HTTPError as e:
         result["status_code"] = e.code
+        result["final_url"] = e.geturl()
         result["headers"] = dict(e.headers) if e.headers else {}
+        result["elapsed_ms"] = round((time.monotonic() - started) * 1000, 2)
     except (urllib.error.URLError, socket.timeout, OSError) as e:
         result["error"] = str(e)
         return result
     hdr_lower = {k.lower(): v for k, v in result.get("headers", {}).items()}
+    result["redirected"] = result.get("final_url") != url
     sec: Dict[str, Dict[str, Any]] = {}
     for sh in sec_names:
         val = hdr_lower.get(sh.lower())
         sec[sh] = {"present": val is not None, "value": val.strip() if val else None}
     result["security_headers"] = sec
     return result
+
+
+def parse_endpoint(target: str, default_port: int = 443) -> Dict[str, Any]:
+    """Parse a hostname, host:port, bracketed IPv6 endpoint, or URL."""
+    raw = target.strip()
+    if not raw:
+        raise ValueError("Target must not be empty")
+    scheme = None
+    path = ""
+    if "://" in raw:
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Target URL must use http:// or https:// and include a host")
+        host = parsed.hostname
+        scheme = parsed.scheme
+        try:
+            port = parsed.port or (443 if scheme == "https" else 80)
+        except ValueError as exc:
+            raise ValueError(f"Invalid target port: {exc}")
+        path = parsed.path or "/"
+    elif raw.startswith("["):
+        match = re.fullmatch(r"\[([^]]+)](?::(\d+))?", raw)
+        if not match:
+            raise ValueError(f"Invalid bracketed endpoint: '{target}'")
+        host = match.group(1)
+        port = int(match.group(2)) if match.group(2) else default_port
+    elif raw.count(":") == 1 and raw.rsplit(":", 1)[1].isdigit():
+        host, port_text = raw.rsplit(":", 1)
+        port = int(port_text)
+    else:
+        host = raw
+        port = default_port
+    _validate_host(host)
+    _validate_port(port)
+    return {"target": raw, "host": host, "port": port, "scheme": scheme, "path": path}
+
+
+def resolve_all(host: str, timeout: float = 5.0) -> Dict[str, Any]:
+    _validate_host(host)
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    started = time.monotonic()
+    try:
+        records = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        addresses = []
+        for family, _socktype, _proto, canonical, sockaddr in records:
+            value = sockaddr[0]
+            item = {
+                "address": value,
+                "family": "IPv6" if family == socket.AF_INET6 else "IPv4",
+            }
+            if canonical:
+                item["canonical_name"] = canonical
+            if item not in addresses:
+                addresses.append(item)
+        return {
+            "status": "ok" if addresses else "failed",
+            "addresses": addresses,
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        return {
+            "status": "failed",
+            "addresses": [],
+            "error": str(exc),
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+
+
+def tcp_probe(host: str, port: int, timeout: float = 5.0) -> Dict[str, Any]:
+    _validate_host(host)
+    _validate_port(port)
+    started = time.monotonic()
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return {
+                "status": "ok",
+                "host": host,
+                "port": port,
+                "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+            }
+    except (socket.timeout, ConnectionRefusedError, socket.gaierror, OSError) as exc:
+        return {
+            "status": "failed",
+            "host": host,
+            "port": port,
+            "error": str(exc),
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+
+
+def wait_for_service(
+    host: str,
+    port: int,
+    timeout: float = 60.0,
+    interval: float = 2.0,
+) -> Dict[str, Any]:
+    """Wait until a TCP endpoint accepts a connection or the deadline passes."""
+    _validate_host(host)
+    _validate_port(port)
+    if timeout <= 0 or interval <= 0:
+        raise ValueError("Timeout and interval must be greater than zero")
+    started = time.monotonic()
+    deadline = started + timeout
+    attempts = 0
+    last_error = None
+    while True:
+        attempts += 1
+        remaining = max(0.01, deadline - time.monotonic())
+        probe = tcp_probe(host, port, timeout=min(interval, remaining))
+        if probe["status"] == "ok":
+            return {
+                "status": "ready",
+                "host": host,
+                "port": port,
+                "attempts": attempts,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            }
+        last_error = probe.get("error")
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        time.sleep(min(interval, deadline - now))
+    return {
+        "status": "timed_out",
+        "host": host,
+        "port": port,
+        "attempts": attempts,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "error": last_error,
+    }
+
+
+def doctor_target(
+    target: str,
+    timeout: float = 5.0,
+    warn_days: int = 30,
+) -> Dict[str, Any]:
+    """Run DNS, TCP, TLS, and HTTP checks as one diagnostic pipeline."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    if warn_days < 0:
+        raise ValueError("warn_days must be zero or greater")
+    endpoint = parse_endpoint(target)
+    host = endpoint["host"]
+    port = endpoint["port"]
+    scheme = endpoint["scheme"] or ("https" if port == 443 else "http")
+    url_host = f"[{host}]" if ":" in host else host
+    url = target if endpoint["scheme"] else f"{scheme}://{url_host}:{port}/"
+    started = time.monotonic()
+    checks: Dict[str, Any] = {}
+    checks["dns"] = resolve_all(host, timeout)
+    checks["tcp"] = tcp_probe(host, port, timeout)
+    if checks["tcp"]["status"] == "ok" and scheme == "https":
+        certificate = cert_check(host, port, int(max(1, timeout)))
+        if "error" in certificate:
+            certificate["status"] = "failed"
+        elif certificate.get("expired") or certificate.get("not_yet_valid"):
+            certificate["status"] = "failed"
+        elif certificate.get("days_remaining") is not None and certificate["days_remaining"] <= warn_days:
+            certificate["status"] = "warning"
+        else:
+            certificate["status"] = "ok"
+        checks["tls"] = certificate
+    if checks["tcp"]["status"] == "ok" and scheme in {"http", "https"}:
+        web = http_headers(url, int(max(1, timeout)))
+        if "error" in web or int(web.get("status_code", 599)) >= 500:
+            web["status"] = "failed"
+        elif int(web.get("status_code", 599)) >= 400:
+            web["status"] = "warning"
+        else:
+            web["status"] = "ok"
+        checks["http"] = web
+    statuses = [check.get("status", "failed") for check in checks.values()]
+    if "failed" in statuses:
+        status = "failed"
+    elif "warning" in statuses:
+        status = "warning"
+    else:
+        status = "ok"
+    return {
+        "target": target,
+        "host": host,
+        "port": port,
+        "scheme": scheme,
+        "status": status,
+        "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        "checks": checks,
+    }
+
+
+def run_batch(targets: List[str], function, workers: int = 10) -> List[Dict[str, Any]]:
+    """Apply a diagnostic function concurrently while preserving input order."""
+    if not 1 <= workers <= 256:
+        raise ValueError("Workers must be between 1 and 256")
+    if len(targets) > MAX_BATCH_TARGETS:
+        raise ValueError(f"Batch exceeds {MAX_BATCH_TARGETS} targets")
+    results: List[Optional[Dict[str, Any]]] = [None] * len(targets)
+    with ThreadPoolExecutor(max_workers=min(workers, max(1, len(targets)))) as pool:
+        futures = {pool.submit(function, target): (index, target) for index, target in enumerate(targets)}
+        for future in as_completed(futures):
+            index, target = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as exc:
+                results[index] = {"target": target, "status": "failed", "error": str(exc)}
+    return [cast(Dict[str, Any], result) for result in results]
+
+
+def audit_certificates(
+    targets: List[str],
+    warn_days: int = 30,
+    timeout: int = 5,
+    workers: int = 10,
+) -> List[Dict[str, Any]]:
+    if warn_days < 0:
+        raise ValueError("warn_days must be zero or greater")
+
+    def check(target: str) -> Dict[str, Any]:
+        endpoint = parse_endpoint(target)
+        result = cert_check(endpoint["host"], endpoint["port"], timeout)
+        result["target"] = target
+        if "error" in result:
+            result["status"] = "failed"
+        elif result.get("expired"):
+            result["status"] = "expired"
+        elif result.get("not_yet_valid"):
+            result["status"] = "not_yet_valid"
+        elif result.get("days_remaining") is not None and result["days_remaining"] <= warn_days:
+            result["status"] = "warning"
+        else:
+            result["status"] = "ok"
+        return result
+
+    return run_batch(targets, check, workers)
 
 
 # ---------------------------------------------------------------------------
@@ -2415,17 +3776,18 @@ def _setup_parser():
     # -- convert --
     p = sub.add_parser("convert", aliases=["conv", "c"], parents=[shared], help="Number/base conversions",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  convert d2b 42\n  convert b2d 10101010\n  convert d2h 255\n  convert iptobin 192.168.1.1\n  convert ipinfo 192.168.1.42/24")
+                        epilog="Examples:\n  convert d2b 42\n  convert iptobin 192.168.1.1\n  convert ipinfo 192.168.1.42/24\n  convert ipclass 100.64.0.1")
     p.add_argument("op", choices=["d2b","b2d","d2h","h2d","b2h","h2b","iptobin","bintoip",
                                    "masktobin","bintomask","m2c","c2m","m2w","w2m","c2w","w2c",
-                                   "a2b","b2a","ipinfo"], help="Conversion operation")
+                                   "a2b","b2a","ipinfo","ipclass"], help="Conversion operation")
     p.add_argument("value", nargs='+', help="Value(s) to convert")
 
     # -- subnet --
     p = sub.add_parser("subnet", aliases=["sub", "s"], parents=[shared], help="Subnet calculations",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  subnet calc 192.168.0.0/24\n  subnet adv 192.168.1.0/24 26\n  subnet vlsm 192.168.1.0/24 50 30 10\n  subnet range 192.168.1.10 192.168.1.35\n  subnet overlap 10.0.0.0/24 10.0.0.128/25\n  subnet supernet 10.0.0.0/26 10.0.0.64/26")
-    p.add_argument("op", choices=["calc","adv","vlsm","overlap","supernet","range"], help="Subnet operation")
+                        epilog="Examples:\n  subnet calc 192.168.0.0/24\n  subnet adv 192.168.1.0/24 26\n  subnet vlsm 192.168.1.0/24 50 30 10\n  subnet contains 10.0.0.0/8 10.1.2.3\n  subnet exclude 10.0.0.0/24 10.0.0.64/26\n  subnet nth 2001:db8::/64 1000\n  subnet audit inventory.json")
+    p.add_argument("op", choices=["calc","adv","vlsm","overlap","supernet","range",
+                                   "contains","exclude","nth","audit"], help="Subnet operation")
     p.add_argument("args", nargs='+', help="Arguments")
     p.add_argument(
         "--limit", type=int, default=MAX_SUBNET_DETAILS,
@@ -2442,28 +3804,44 @@ def _setup_parser():
     # -- mac --
     p = sub.add_parser("mac", aliases=["m"], parents=[shared], help="MAC address utilities",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  mac info AA:BB:CC:DD:EE:FF\n  mac format aa:bb:cc:dd:ee:ff cisco\n  mac generate 5 colon")
-    p.add_argument("op", choices=["info","format","normalize","vendor","generate"], help="MAC operation")
+                        epilog="Examples:\n  mac info AA:BB:CC:DD:EE:FF\n  mac format aa:bb:cc:dd:ee:ff cisco\n  mac generate 5 colon\n  mac oui-update\n  mac vendor 00:11:22:33:44:55")
+    p.add_argument("op", choices=["info","format","normalize","vendor","generate","oui-update"], help="MAC operation")
     p.add_argument("value", nargs='?', default="", help="MAC address, or quantity for 'generate'")
     p.add_argument("style", nargs='?', default="colon", help="Format style (colon/dash/cisco/bare)")
+    p.add_argument("--db", help="IEEE OUI CSV path (default: user cache)")
+    p.add_argument("--url", default=DEFAULT_IEEE_OUI_URL, help="HTTPS URL used by oui-update")
+    p.add_argument("--timeout", type=int, default=30, help="Network timeout in seconds")
 
     # -- net --
     p = sub.add_parser("net", aliases=["n"], parents=[shared], help="Network diagnostics",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  net ping 8.8.8.8\n  net pingsweep 192.168.1.0/24\n  net portscan 192.168.1.1 22 80 443\n  net portscan-adv 192.168.1.1 top20 banner\n  net portscan-net 192.168.1.0/24 22\n  net traceroute-asn example.com\n  net dns-type example.com MX\n  net dns-compare example.com 8.8.8.8 1.1.1.1\n  net certcheck example.com\n  net headers https://example.com\n  net random-ports 49152 65535 10\n  net arp\n  net rdns-sweep 192.168.1.0/24")
+                        epilog="Examples:\n  net doctor https://example.com\n  net doctor --input targets.txt --format ndjson\n  net wait database.internal 5432 --timeout 60\n  net cert-audit --input tls-targets.txt --format csv\n  net dns-health example.com --dkim-selector mail\n  net local --json\n  net portscan 192.168.1.1 22 80 443\n  net traceroute-asn example.com")
     p.add_argument("op", choices=["ping","pingsweep","portscan","portscan-adv","portscan-udp","portscan-net",
                                    "traceroute","tracert","traceroute-asn","whois","dns","dns-type","dns-compare",
                                    "dns-axfr","rdns","rdns-sweep","arp","certcheck","headers","banner",
-                                   "random-ports"], help="Network operation")
+                                   "random-ports","doctor","wait","cert-audit","dns-health","local"], help="Network operation")
     p.add_argument("target", nargs='?', default="", help="Target host/IP/domain (not needed for arp)")
     p.add_argument("extra", nargs='*', help="Extra args (ports for portscan)")
+    p.add_argument("--input", dest="input_file", help="Read batch targets from a file, or '-' for stdin")
+    p.add_argument("--format", choices=["text", "json", "ndjson", "csv"], default="text", dest="output_format")
+    p.add_argument("--timeout", type=float, help="Operation timeout in seconds")
+    p.add_argument("--workers", type=int, default=10, help="Batch worker count (1-256)")
+    p.add_argument("--warn-days", type=int, default=30, help="Certificate warning threshold")
+    p.add_argument("--interval", type=float, default=2.0, help="Polling interval for net wait")
+    p.add_argument("--dkim-selector", help="Optional DKIM selector for dns-health")
 
     # -- vendor --
     p = sub.add_parser("vendor", aliases=["v"], parents=[shared], help="Vendor config helpers",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  vendor vlan cisco 10 Engineering\n  vendor acl cisco BLOCK deny tcp 10.0.0.0/8 any")
-    p.add_argument("op", choices=["vlan","acl"], help="Vendor operation")
-    p.add_argument("args", nargs='+', help="Arguments")
+                        epilog="Examples:\n  vendor profiles\n  vendor profiles --legacy\n  vendor vlan cisco 10 Engineering Gi1/0/1\n  vendor vlan cisco 10 Engineering Gi1/0/48 --mode trunk --allowed-vlans 10,20-30\n  vendor acl cisco BLOCK deny tcp 10.0.0.0/8 any")
+    p.add_argument("op", choices=["vlan","acl","profiles"], help="Vendor operation")
+    p.add_argument("args", nargs='*', help="Arguments")
+    p.add_argument("--platform", dest="platform_name", help="Explicit platform profile")
+    p.add_argument("--software-version", help="Validate a release against the selected profile")
+    p.add_argument("--mode", choices=["access", "trunk"], default="access", help="VLAN port mode")
+    p.add_argument("--allowed-vlans", help="Comma-separated VLAN IDs and ranges for trunks")
+    p.add_argument("--native-vlan", type=int, help="Native/PVID VLAN for trunks")
+    p.add_argument("--legacy", action="store_true", help="Allow an explicitly selected legacy profile")
 
     # -- cheat --
     p = sub.add_parser("cheat", aliases=["cs"], parents=[shared], help="Cheatsheets",
@@ -2476,6 +3854,8 @@ def _setup_parser():
         action="store_true",
         help="Include explicitly marked compatibility references for older systems",
     )
+    p.add_argument("--platform", dest="platform_name", help="Filter references by platform profile")
+    p.add_argument("--show-sources", action="store_true", help="Show status, platform, replacement, and source metadata")
 
     return parser
 
@@ -2537,6 +3917,8 @@ def _dispatch_convert(args):
         output(addresses if len(addresses) > 1 else addresses[0], label="address")
     elif op == "ipinfo":
         output(ipv4_info(val[0]), label="ipv4")
+    elif op == "ipclass":
+        output(classify_ip(val[0]), label="classification")
 
 
 def _dispatch_subnet(args):
@@ -2631,6 +4013,26 @@ def _dispatch_subnet(args):
             raise ValueError("Usage: subnet range FIRST_IP LAST_IP")
         cidrs = ipv4_range_to_cidrs(a[0], a[1])
         output(cidrs, label="cidrs")
+    elif op == "contains":
+        if len(a) != 2:
+            raise ValueError("Usage: subnet contains CONTAINER ADDRESS_OR_NETWORK")
+        output(subnet_contains(a[0], a[1]), label="containment")
+    elif op == "exclude":
+        if len(a) != 2:
+            raise ValueError("Usage: subnet exclude CONTAINER EXCLUDED_NETWORK")
+        output(subnet_exclude(a[0], a[1]), label="remaining_networks")
+    elif op == "nth":
+        if len(a) != 2:
+            raise ValueError("Usage: subnet nth NETWORK INDEX")
+        output(subnet_nth(a[0], int(a[1])), label="address")
+    elif op == "audit":
+        if not a:
+            raise ValueError("Usage: subnet audit INVENTORY_FILE [PARENT_NETWORK]")
+        inventory = load_subnet_inventory(a[0])
+        parent = a[1] if len(a) > 1 else inventory.get("parent")
+        result = subnet_audit(inventory["allocations"], parent)
+        output(result, label="subnet_audit")
+        return 0 if result["status"] == "ok" else 1
 
 
 def _dispatch_ipv6(args):
@@ -2679,17 +4081,82 @@ def _dispatch_mac(args):
     elif op == "normalize":
         output(mac_normalize(val), label="mac")
     elif op == "vendor":
-        output(mac_vendor(val), label="oui")
+        database = args.db
+        if database or default_oui_database_path().is_file():
+            output(mac_vendor_lookup(val, database), label="vendor")
+        else:
+            output(mac_vendor(val), label="oui")
     elif op == "generate":
         count = int(val) if val else 1
         output(generate_local_macs(count, args.style), label="mac_addresses")
+    elif op == "oui-update":
+        output(update_oui_database(args.db, args.url, args.timeout), label="oui_database")
 
 
 def _dispatch_net(args):
     op = args.op
     target = args.target
-    if op == "ping":
-        result = ping_host(target)
+    output_format = "json" if getattr(args, "json", False) else args.output_format
+    if args.timeout is not None and args.timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    if not 1 <= args.workers <= 256:
+        raise ValueError("Workers must be between 1 and 256")
+    if op == "doctor":
+        targets = read_targets(args.input_file) if args.input_file else ([target] if target else [])
+        if not targets:
+            raise ValueError("Usage: net doctor TARGET or net doctor --input FILE")
+        timeout = args.timeout if args.timeout is not None else 5.0
+        results = run_batch(
+            targets,
+            lambda item: doctor_target(item, timeout, args.warn_days),
+            args.workers,
+        )
+        emit_records(results, output_format, label="doctor")
+        return 1 if any(result.get("status") in {"warning", "failed"} for result in results) else 0
+    elif op == "wait":
+        if not target or not args.extra:
+            raise ValueError("Usage: net wait HOST PORT [--timeout SECONDS] [--interval SECONDS]")
+        timeout = args.timeout if args.timeout is not None else 60.0
+        result = wait_for_service(target, int(args.extra[0]), timeout, args.interval)
+        if output_format in {"csv", "ndjson"}:
+            emit_records([result], output_format, label="wait")
+        else:
+            output(result, label="wait")
+        return 0 if result["status"] == "ready" else 1
+    elif op == "cert-audit":
+        if args.input_file:
+            targets = read_targets(args.input_file)
+        elif target and Path(target).expanduser().is_file():
+            targets = read_targets(target)
+        elif target:
+            targets = [target]
+        else:
+            raise ValueError("Usage: net cert-audit HOST_OR_FILE or net cert-audit --input FILE")
+        timeout = int(args.timeout if args.timeout is not None else 5)
+        results = audit_certificates(targets, args.warn_days, timeout, args.workers)
+        emit_records(results, output_format, label="certificates")
+        return 1 if any(result.get("status") != "ok" for result in results) else 0
+    elif op == "dns-health":
+        targets = read_targets(args.input_file) if args.input_file else ([target] if target else [])
+        if not targets:
+            raise ValueError("Usage: net dns-health DOMAIN or net dns-health --input FILE")
+        timeout = int(args.timeout if args.timeout is not None else 5)
+        results = run_batch(
+            targets,
+            lambda item: dns_health(item, timeout, args.dkim_selector),
+            args.workers,
+        )
+        emit_records(results, output_format, label="dns_health")
+        return 1 if any(result.get("status") != "ok" for result in results) else 0
+    elif op == "local":
+        result = local_network_inventory()
+        if output_format in {"csv", "ndjson"}:
+            emit_records([result], output_format, label="local_network")
+        else:
+            output(result, label="local_network")
+        return 0
+    elif op == "ping":
+        result = ping_host(target, timeout=max(1, int(args.timeout or 2)))
         if is_json_mode():
             output(result, label="ping")
         else:
@@ -2708,14 +4175,14 @@ def _dispatch_net(args):
                 ports.append(int(pa))
         if not ports:
             raise ValueError("Usage: net portscan HOST PORT1 [PORT2 ...] or HOST 20-25")
-        results = tcp_port_check(target, ports)
+        results = tcp_port_check(target, ports, timeout=args.timeout or 1.0)
         if is_json_mode():
             output(results, label="portscan")
         else:
             for r in results:
                 print(f"  {r['port']:5d}/tcp  {r['state']:8s}  {r['service']}")
     elif op in ("traceroute", "tracert"):
-        hops = traceroute(target)
+        hops = traceroute(target, timeout=max(1, int(args.timeout or 2)))
         if is_json_mode():
             output(hops, label="traceroute")
         else:
@@ -2730,7 +4197,9 @@ def _dispatch_net(args):
                     else:
                         print(f"  {h['hop']:2d}  {h['ip']}  {rtt}")
     elif op == "pingsweep":
-        results = ping_sweep(target)
+        results = ping_sweep(
+            target, timeout=max(1, int(args.timeout or 1)), max_threads=args.workers
+        )
         if is_json_mode():
             output(results, label="pingsweep")
         else:
@@ -2756,7 +4225,10 @@ def _dispatch_net(args):
                 ports.append(int(pa))
         if not ports:
             ports = list(TOP_PORTS.keys())
-        results = tcp_port_scan_advanced(target, ports, grab_banner=do_banner)
+        results = tcp_port_scan_advanced(
+            target, ports, timeout=args.timeout or 1.0,
+            grab_banner=do_banner, max_threads=args.workers,
+        )
         if is_json_mode():
             output(results, label="portscan")
         else:
@@ -2777,7 +4249,7 @@ def _dispatch_net(args):
                 ports.append(int(pa))
         if not ports:
             raise ValueError("Usage: net portscan-udp HOST PORT1 [PORT2 ...]")
-        results = udp_port_check(target, ports)
+        results = udp_port_check(target, ports, timeout=args.timeout or 2.0)
         if is_json_mode():
             output(results, label="udpscan")
         else:
@@ -2788,7 +4260,9 @@ def _dispatch_net(args):
         if not args.extra:
             raise ValueError("Usage: net portscan-net NETWORK PORT")
         port = int(args.extra[0])
-        results = scan_network_port(target, port)
+        results = scan_network_port(
+            target, port, timeout=args.timeout or 1.0, max_threads=args.workers
+        )
         if is_json_mode():
             output(results, label="netscan")
         else:
@@ -2801,7 +4275,7 @@ def _dispatch_net(args):
         if not args.extra:
             raise ValueError("Usage: net banner HOST PORT")
         port = int(args.extra[0])
-        result = banner_grab(target, port)
+        result = banner_grab(target, port, timeout=args.timeout or 2.0)
         if is_json_mode():
             output({"host": target, "port": port, "banner": result}, label="banner")
         elif result:
@@ -2813,7 +4287,7 @@ def _dispatch_net(args):
         output(whois_lookup(target), label="whois")
 
     elif op in ("traceroute-asn",):
-        hops = traceroute_asn(target)
+        hops = traceroute_asn(target, timeout=max(1, int(args.timeout or 2)))
         if is_json_mode():
             output(hops, label="traceroute_asn")
         else:
@@ -2835,7 +4309,9 @@ def _dispatch_net(args):
             raise ValueError("Usage: net dns-type DOMAIN TYPE [SERVER]")
         rtype = args.extra[0] if args.extra else "A"
         server = args.extra[1] if len(args.extra) > 1 else None
-        result = dns_lookup_type(target, rtype, server=server)
+        result = dns_lookup_type(
+            target, rtype, server=server, timeout=max(1, int(args.timeout or 5))
+        )
         if is_json_mode():
             output(result, label="dns")
         else:
@@ -2854,7 +4330,9 @@ def _dispatch_net(args):
         if args.extra[-1].upper() in ("A","AAAA","MX","TXT","NS","CNAME","SOA"):
             rtype = args.extra[-1].upper()
             servers = args.extra[:-1]
-        result = dns_compare(target, servers, rtype)
+        result = dns_compare(
+            target, servers, rtype, timeout=max(1, int(args.timeout or 5))
+        )
         if is_json_mode():
             output(result, label="dns_compare")
         else:
@@ -2864,7 +4342,9 @@ def _dispatch_net(args):
 
     elif op == "dns-axfr":
         ns = args.extra[0] if args.extra else None
-        result = dns_zone_transfer(target, nameserver=ns)
+        result = dns_zone_transfer(
+            target, nameserver=ns, timeout=max(1, int(args.timeout or 30))
+        )
         if is_json_mode():
             output(result, label="zone_transfer")
         else:
@@ -2879,7 +4359,9 @@ def _dispatch_net(args):
                 print(f"    Error: {result['error']}")
 
     elif op == "rdns-sweep":
-        results = reverse_dns_sweep(target)
+        results = reverse_dns_sweep(
+            target, timeout=max(1, int(args.timeout or 2)), max_threads=args.workers
+        )
         if is_json_mode():
             output(results, label="rdns_sweep")
         else:
@@ -2899,14 +4381,19 @@ def _dispatch_net(args):
 
     elif op == "certcheck":
         port = int(args.extra[0]) if args.extra else 443
-        result = cert_check(target, port)
+        result = cert_check(target, port, timeout=max(1, int(args.timeout or 5)))
         if is_json_mode():
             output(result, label="cert")
         else:
             if 'error' in result:
                 print(f"  {target}:{port} - {result['error']}")
             else:
-                status = "EXPIRED" if result['expired'] else f"{result['days_remaining']}d remaining"
+                if result.get('expired'):
+                    status = "EXPIRED"
+                elif result.get('not_yet_valid'):
+                    status = "NOT YET VALID"
+                else:
+                    status = f"{result['days_remaining']}d remaining"
                 print(f"  {target}:{port}")
                 print(f"    Subject : {result['subject']}")
                 print(f"    Issuer  : {result['issuer']}")
@@ -2917,7 +4404,7 @@ def _dispatch_net(args):
                     print(f"              ... +{len(result['san'])-5} more")
 
     elif op == "headers":
-        result = http_headers(target)
+        result = http_headers(target, timeout=max(1, int(args.timeout or 5)))
         if is_json_mode():
             output(result, label="headers")
         else:
@@ -2966,44 +4453,58 @@ def _dispatch_net(args):
 def _dispatch_vendor(args):
     op = args.op
     a = args.args
-    if op == "vlan":
+    if op == "profiles":
+        output(platform_profiles(include_legacy=args.legacy), label="platform_profiles")
+    elif op == "vlan":
         if len(a) < 2:
             raise ValueError("Usage: vendor vlan VENDOR VLAN_ID [NAME] [PORTS...]")
         vendor = a[0]
         vlan_id = int(a[1])
         vlan_name = a[2] if len(a) > 2 else None
         ports = a[3:] if len(a) > 3 else None
-        output(vlan_helper(vendor, vlan_id, vlan_name, ports), label="configuration")
+        output(
+            vlan_helper(
+                vendor,
+                vlan_id,
+                vlan_name,
+                ports,
+                platform_name=args.platform_name,
+                software_version=args.software_version,
+                mode=args.mode,
+                allowed_vlans=args.allowed_vlans,
+                native_vlan=args.native_vlan,
+                allow_legacy=args.legacy,
+            ),
+            label="configuration",
+        )
     elif op == "acl":
         if len(a) < 6:
             raise ValueError("Usage: vendor acl VENDOR NAME ACTION PROTO SRC DST [SPORT] [DPORT]")
         src_port = int(a[6]) if len(a) > 6 and a[6] != "0" else None
         dst_port = int(a[7]) if len(a) > 7 and a[7] != "0" else None
         output(
-            acl_helper(a[0], a[1], a[2], a[3], a[4], a[5], src_port, dst_port),
+            acl_helper(
+                a[0], a[1], a[2], a[3], a[4], a[5], src_port, dst_port,
+                platform_name=args.platform_name,
+                software_version=args.software_version,
+                allow_legacy=args.legacy,
+            ),
             label="configuration",
         )
 
 
 def _dispatch_cheat(args):
-    sheet_map = {
-        "vlan": vlan_cheatsheet,
-        "acl": acl_cheatsheet,
-        "huawei": huawei_vlan_cheatsheet,
-        "mikrotik": mikrotik_vlan_cheatsheet,
-        "firewall": firewall_cheatsheet,
-        "routing": routing_cheatsheet,
-        "nat": nat_cheatsheet,
-    }
     if args.legacy and args.sheet != "vlan":
         raise ValueError(
             "--legacy is currently available only for the VLAN cheatsheet"
         )
-    fn = sheet_map[args.sheet]
-    if args.sheet == "vlan":
-        content = vlan_cheatsheet(args.section, include_legacy=args.legacy)
-    else:
-        content = fn(args.section)
+    content = render_cheatsheet(
+        args.sheet,
+        args.section,
+        include_legacy=args.legacy,
+        platform_name=args.platform_name,
+        show_sources=args.show_sources,
+    )
     output(content, label="cheatsheet")
 
 
@@ -3107,7 +4608,9 @@ def main():
 
     try:
         if args.command in DISPATCH:
-            DISPATCH[args.command](args)
+            exit_code = DISPATCH[args.command](args)
+            if isinstance(exit_code, int) and exit_code:
+                sys.exit(exit_code)
         else:
             parser.print_help()
     except (ValueError, ipaddress.AddressValueError, ipaddress.NetmaskValueError) as e:
@@ -3116,6 +4619,11 @@ def main():
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        finally:
+            sys.exit(0)
     except KeyboardInterrupt:
         sys.exit(130)
 
