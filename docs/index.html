@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SysAdminToolbox - Network Administration Suite</title>
+<meta name="description" content="SysAdminToolbox: a single-file, zero-dependency network administration CLI - conversions, subnetting, diagnostics, vendor config generation and cheatsheets.">
+<meta name="theme-color" content="#2a78d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://franckferman.github.io/SysAdminToolbox/">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzJhNzhkNiIvPjxnIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTkgMTIgMTQgMTYgOSAyMCIvPjxwYXRoIGQ9Ik0xNyAyMSBoNiIvPjwvZz48L3N2Zz4=">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SysAdminToolbox - Network Administration Suite">
+<meta property="og:description" content="Single-file, zero-dependency network CLI: conversions, subnetting, diagnostics, vendor config and cheatsheets.">
+<meta property="og:url" content="https://franckferman.github.io/SysAdminToolbox/">
+<meta property="og:image" content="https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/docs/github/graphical_resources/Logo-Without_background-SysAdminToolbox.png">
+<meta name="twitter:card" content="summary">
+<style>
+  :root {
+    color-scheme: light;
+    --plane:#f9f9f7; --surface-1:#fcfcfb; --surface-2:#f2f1ee;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+    --gridline:#e1e0d9; --accent:#2a78d6; --accent-soft:#eef3fb;
+    --border:rgba(11,11,11,0.10); --good:#0a7d33;
+    --code-bg:#f4f3f0; --code-ink:#1f2933;
+    --radius:12px; --maxw:1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane:#0d0d0d; --surface-1:#1a1a19; --surface-2:#161615;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+      --gridline:#2c2c2a; --accent:#3987e5; --accent-soft:#16283f;
+      --border:rgba(255,255,255,0.10); --good:#3fbf6a;
+      --code-bg:#111110; --code-ink:#d7d7cf;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:#0d0d0d; --surface-1:#1a1a19; --surface-2:#161615;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --gridline:#2c2c2a; --accent:#3987e5; --accent-soft:#16283f;
+    --border:rgba(255,255,255,0.10); --good:#3fbf6a;
+    --code-bg:#111110; --code-ink:#d7d7cf;
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; background:var(--plane); color:var(--text-primary);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55;
+  }
+  code, pre, .mono { font-family:ui-monospace,"SFMono-Regular","Cascadia Code","Menlo",monospace; }
+  a { color:var(--accent); }
+  .wrap { max-width:var(--maxw); margin:0 auto; padding:24px 20px 72px; }
+
+  header.top { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
+  .brand { display:flex; align-items:center; gap:11px; }
+  .brand .logo { width:34px; height:34px; flex:none; border-radius:8px; background:var(--accent); display:grid; place-items:center; color:#fff; font-weight:700; }
+  .brand b { font-size:1.12rem; letter-spacing:-0.01em; }
+  .brand .ver { color:var(--muted); font-size:.8rem; border:1px solid var(--border); border-radius:999px; padding:1px 8px; }
+  .top-actions { display:flex; gap:8px; align-items:center; }
+  .btn { cursor:pointer; text-decoration:none; border:1px solid var(--border); background:var(--surface-1);
+         color:var(--text-secondary); border-radius:999px; padding:7px 13px; font-size:.85rem; }
+  .btn:hover { color:var(--text-primary); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.primary:hover { filter:brightness(1.06); color:#fff; }
+
+  .hero { padding:26px 0 10px; }
+  .hero h1 { font-size:clamp(1.7rem,4vw,2.5rem); margin:0 0 8px; letter-spacing:-0.02em; }
+  .hero p.lead { color:var(--text-secondary); font-size:1.05rem; margin:0 0 6px; max-width:64ch; }
+  .badges { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 4px; }
+  .pill { font-size:.78rem; color:var(--text-secondary); background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:3px 10px; }
+
+  h2.section { font-size:1.25rem; margin:36px 0 4px; letter-spacing:-0.01em; }
+  .section-sub { color:var(--muted); font-size:.9rem; margin:0 0 16px; }
+
+  /* code blocks with copy */
+  .codewrap { position:relative; min-width:0; }
+  pre.code { background:var(--code-bg); color:var(--code-ink); border:1px solid var(--border); border-radius:10px;
+             padding:13px 15px; overflow-x:auto; max-width:100%; font-size:.86rem; margin:0; }
+  pre.code .p { color:var(--accent); user-select:none; }
+  .copy { position:absolute; top:8px; right:8px; cursor:pointer; font:inherit; font-size:.75rem;
+          border:1px solid var(--border); background:var(--surface-1); color:var(--text-secondary);
+          border-radius:7px; padding:3px 8px; opacity:0; transition:opacity .1s; }
+  .codewrap:hover .copy, .copy:focus-visible { opacity:1; }
+  .copy.ok { color:var(--good); border-color:var(--good); opacity:1; }
+
+  .install-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  @media (max-width:640px){ .install-grid { grid-template-columns:1fr; } }
+  .card { background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; min-width:0; }
+  .card h3 { margin:0 0 9px; font-size:.95rem; }
+
+  /* command reference */
+  .filter { width:100%; font:inherit; color:var(--text-primary); background:var(--surface-1);
+            border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:14px; }
+  .filter::placeholder { color:var(--muted); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .cmd-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr)); gap:14px; }
+  .cmd { background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius); padding:15px 16px; min-width:0; }
+  .cmd .head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  .cmd .name { font-weight:650; font-size:1rem; }
+  .cmd .aka { color:var(--muted); font-size:.78rem; }
+  .cmd .desc { color:var(--text-secondary); font-size:.87rem; margin:5px 0 9px; }
+  .cmd .ops { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:11px; }
+  .cmd .op { font-size:.74rem; color:var(--text-secondary); background:var(--surface-2); border:1px solid var(--border);
+             border-radius:6px; padding:1px 7px; }
+  .cmd .ex { margin-top:8px; }
+
+  /* cheatsheets */
+  .tabs { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+  .tab { cursor:pointer; font:inherit; font-size:.85rem; border:1px solid var(--border); background:var(--surface-1);
+         color:var(--text-secondary); border-radius:999px; padding:6px 14px; }
+  .tab:hover { color:var(--text-primary); }
+  .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #cheat-body { min-height:120px; }
+  .empty { color:var(--muted); padding:20px 4px; }
+
+  footer { margin-top:52px; padding-top:20px; border-top:1px solid var(--gridline); color:var(--muted); font-size:.83rem;
+           display:flex; gap:8px 18px; flex-wrap:wrap; }
+  footer a { color:var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="logo mono">&gt;_</span>
+      <b>SysAdminToolbox</b>
+      <span class="ver" id="ver">v3.3.1</span>
+    </div>
+    <div class="top-actions">
+      <a class="btn" href="https://github.com/franckferman/SysAdminToolbox" rel="noopener" target="_blank">GitHub</a>
+      <button class="btn" id="theme" type="button" aria-label="Toggle theme">Theme</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Network administration, one file, zero dependencies.</h1>
+    <p class="lead">Conversions, subnetting, diagnostics, vendor config generation and cheatsheets - a single-file Python CLI that runs anywhere Python 3.9+ does, standard library only.</p>
+    <div class="badges">
+      <span class="pill">Single file</span>
+      <span class="pill">Zero runtime dependencies</span>
+      <span class="pill">Python 3.9 - 3.14</span>
+      <span class="pill">JSON output</span>
+      <span class="pill">Interactive REPL</span>
+      <span class="pill">AGPL-3.0</span>
+    </div>
+  </section>
+
+  <h2 class="section">Install</h2>
+  <p class="section-sub">No packages to install for the core tool - it is the standard library only.</p>
+  <div class="install-grid">
+    <div class="card">
+      <h3>Direct download</h3>
+      <div class="codewrap">
+        <pre class="code" data-copy="curl -fsSLO https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/src/SysAdminToolbox/SysAdminToolbox.py
+python3 SysAdminToolbox.py --version"><span class="p">$</span> curl -fsSLO https://raw.githubusercontent.com/franckferman/SysAdminToolbox/stable/src/SysAdminToolbox/SysAdminToolbox.py
+<span class="p">$</span> python3 SysAdminToolbox.py --version</pre>
+        <button class="copy" type="button">Copy</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>pip (from source)</h3>
+      <div class="codewrap">
+        <pre class="code" data-copy="python3 -m pip install https://github.com/franckferman/SysAdminToolbox/archive/refs/heads/stable.zip
+SysAdminToolbox --help"><span class="p">$</span> python3 -m pip install https://github.com/franckferman/SysAdminToolbox/archive/refs/heads/stable.zip
+<span class="p">$</span> SysAdminToolbox --help</pre>
+        <button class="copy" type="button">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section">Command reference</h2>
+  <p class="section-sub">Seven command groups. Every subcommand accepts <code>--json</code> and <code>--no-color</code>; run with <code>-i</code> for an interactive REPL.</p>
+  <input class="filter" id="cmd-filter" type="search" placeholder="Filter commands (e.g. subnet, dns, mac, cheat)..." aria-label="Filter commands">
+  <div class="cmd-grid" id="cmd-grid"></div>
+
+  <h2 class="section">Cheatsheets</h2>
+  <p class="section-sub">The same reference material the <code>cheat</code> command prints, straight from the tool.</p>
+  <div class="tabs" id="cheat-tabs"></div>
+  <div class="codewrap">
+    <pre class="code" id="cheat-body"><span class="empty">Loading cheatsheets...</span></pre>
+    <button class="copy" id="cheat-copy" type="button" style="opacity:1">Copy</button>
+  </div>
+
+  <footer>
+    <span><a href="https://github.com/franckferman/SysAdminToolbox" rel="noopener" target="_blank">Source</a></span>
+    <span><a href="https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE" rel="noopener" target="_blank">AGPL-3.0</a></span>
+    <span>By <a href="https://github.com/franckferman" rel="noopener" target="_blank">franckferman</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  try { var s = localStorage.getItem("sat-theme"); if (s === "dark" || s === "light") root.setAttribute("data-theme", s); } catch (e) {}
+  document.getElementById("theme").addEventListener("click", function () {
+    var dark = getComputedStyle(root).colorScheme.indexOf("dark") !== -1;
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("sat-theme", next); } catch (e) {}
+  });
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function copyText(text, btn) {
+    var done = function () { var p = btn.textContent; btn.textContent = "Copied"; btn.classList.add("ok");
+      setTimeout(function(){ btn.textContent = p; btn.classList.remove("ok"); }, 1100); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function(){}); }
+    else { try { var t=document.createElement("textarea"); t.value=text; t.style.position="fixed"; t.style.opacity="0";
+      document.body.appendChild(t); t.select(); document.execCommand("copy"); document.body.removeChild(t); done(); } catch(e){} }
+  }
+  // copy buttons for static code blocks
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest(".copy"); if (!b || b.id === "cheat-copy") return;
+    var pre = b.parentElement.querySelector("pre.code"); if (!pre) return;
+    copyText(pre.getAttribute("data-copy") || pre.textContent, b);
+  });
+
+  // ---- Command reference ----
+  var COMMANDS = [
+    { name:"convert", aka:"conv, c", desc:"Number and address base conversions.",
+      ops:["d2b","b2d","d2h","h2d","b2h","h2b","iptobin","bintoip","masktobin","bintomask","m2c","c2m","m2w","w2m","c2w","w2c","a2b","b2a","ipinfo"],
+      ex:["convert d2b 42","convert ipinfo 192.168.1.42/24","convert m2c 255.255.255.0"] },
+    { name:"subnet", aka:"sub, s", desc:"IPv4 subnetting, VLSM, ranges, overlap and supernet.",
+      ops:["calc","adv","vlsm","overlap","supernet","range"],
+      ex:["subnet calc 192.168.0.0/24","subnet vlsm 192.168.1.0/24 50 30 10","subnet overlap 10.0.0.0/24 10.0.0.128/25"] },
+    { name:"ipv6", aka:"v6", desc:"IPv6 expand, compress, type detection, subnetting and ULA.",
+      ops:["expand","compress","tobin","type","subnet","ula"],
+      ex:["ipv6 expand ::1","ipv6 compress 2001:0db8::1","ipv6 ula"] },
+    { name:"mac", aka:"m", desc:"MAC address info, formatting, vendor lookup and generation.",
+      ops:["info","format","normalize","vendor","generate"],
+      ex:["mac info AA:BB:CC:DD:EE:FF","mac format aa:bb:cc:dd:ee:ff cisco","mac generate 5 colon"] },
+    { name:"net", aka:"n", desc:"Network diagnostics: ping, scans, traceroute, DNS, TLS and HTTP.",
+      ops:["ping","pingsweep","portscan","portscan-adv","portscan-udp","portscan-net","traceroute","traceroute-asn","whois","dns","dns-type","dns-compare","dns-axfr","rdns","rdns-sweep","arp","certcheck","headers","banner","random-ports"],
+      ex:["net ping 8.8.8.8","net portscan-adv 192.168.1.1 top20 banner","net certcheck example.com","net traceroute-asn example.com"] },
+    { name:"vendor", aka:"v", desc:"Generate VLAN and ACL config for Cisco, Juniper and Huawei.",
+      ops:["vlan","acl"],
+      ex:["vendor vlan cisco 10 Engineering","vendor acl cisco BLOCK deny tcp 10.0.0.0/8 any"] },
+    { name:"cheat", aka:"cs", desc:"Cheatsheets for VLAN, ACL, firewall, routing, NAT and more.",
+      ops:["vlan","acl","firewall","routing","nat","huawei","mikrotik"],
+      ex:["cheat vlan","cheat firewall","cheat routing ospf"] }
+  ];
+  var grid = document.getElementById("cmd-grid");
+  function cmdCard(c) {
+    return '<div class="cmd" data-hay="' + esc((c.name + " " + c.aka + " " + c.desc + " " + c.ops.join(" ") + " " + c.ex.join(" ")).toLowerCase()) + '">' +
+      '<div class="head"><span class="name mono">' + esc(c.name) + '</span><span class="aka">' + esc(c.aka) + '</span></div>' +
+      '<div class="desc">' + esc(c.desc) + '</div>' +
+      '<div class="ops">' + c.ops.map(function(o){ return '<span class="op mono">' + esc(o) + '</span>'; }).join("") + '</div>' +
+      '<div class="ex codewrap"><pre class="code" data-copy="' + esc(c.ex.map(function(e){return "SysAdminToolbox " + e;}).join("\n")) + '">' +
+        c.ex.map(function(e){ return '<span class="p">$</span> SysAdminToolbox ' + esc(e); }).join("\n") +
+      '</pre><button class="copy" type="button">Copy</button></div>' +
+    '</div>';
+  }
+  grid.innerHTML = COMMANDS.map(cmdCard).join("");
+  document.getElementById("cmd-filter").addEventListener("input", function () {
+    var q = this.value.trim().toLowerCase();
+    grid.querySelectorAll(".cmd").forEach(function (el) {
+      el.style.display = (!q || el.getAttribute("data-hay").indexOf(q) !== -1) ? "" : "none";
+    });
+  });
+
+  // ---- Cheatsheets ----
+  var tabs = document.getElementById("cheat-tabs");
+  var body = document.getElementById("cheat-body");
+  var CHEATS = {}; var active = null;
+  function showCheat(topic) {
+    active = topic;
+    tabs.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t.dataset.topic === topic); });
+    body.textContent = CHEATS[topic] || "";
+  }
+  document.getElementById("cheat-copy").addEventListener("click", function () {
+    copyText(active ? (CHEATS[active] || "") : "", this);
+  });
+  fetch("./data/cheatsheets.json", { cache: "no-store" })
+    .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (d) {
+      if (d.version) { document.getElementById("ver").textContent = "v" + d.version; }
+      CHEATS = d.cheatsheets || {};
+      var topics = Object.keys(CHEATS);
+      if (!topics.length) { body.innerHTML = '<span class="empty">No cheatsheets found.</span>'; return; }
+      tabs.innerHTML = topics.map(function (t) {
+        return '<button class="tab" type="button" data-topic="' + esc(t) + '">' + esc(t) + '</button>';
+      }).join("");
+      tabs.querySelectorAll(".tab").forEach(function (t) {
+        t.addEventListener("click", function () { showCheat(t.dataset.topic); });
+      });
+      showCheat(topics[0]);
+    })
+    .catch(function (e) { body.innerHTML = '<span class="empty">Could not load cheatsheets (' + esc(e.message) + ').</span>'; });
+})();
+</script>
+</body>
+</html>
