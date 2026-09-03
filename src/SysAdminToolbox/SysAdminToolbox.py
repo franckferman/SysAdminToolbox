@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 4.0.0
+Version  : 4.1.0
 License  : MIT
 
 Repository:
@@ -26,8 +26,10 @@ import platform
 import re
 import secrets
 import shlex
+import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import time
@@ -35,12 +37,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -2938,6 +2941,1356 @@ def local_network_inventory() -> Dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------------------
+#  Read-only system and service diagnostics
+# ---------------------------------------------------------------------------
+
+DIAGNOSTIC_MAX_OUTPUT = 2 * 1024 * 1024
+DIAGNOSTIC_MAX_LOG_LINES = 500
+
+
+def _diagnostic_command(
+    command: List[str],
+    timeout: float = 10.0,
+    max_output: int = DIAGNOSTIC_MAX_OUTPUT,
+) -> Dict[str, Any]:
+    """Run a read-only diagnostic command with bounded captured output."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    started = time.monotonic()
+    environment = dict(os.environ)
+    environment.setdefault("LC_ALL", "C")
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            env=environment,
+        )
+    except FileNotFoundError:
+        return {
+            "available": False,
+            "ok": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error": f"command not found: {command[0]}",
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+    except OSError as exc:
+        return {
+            "available": True,
+            "ok": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error": str(exc),
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "available": True,
+            "ok": False,
+            "returncode": None,
+            "stdout": (exc.stdout or "")[-max_output:] if isinstance(exc.stdout, str) else "",
+            "stderr": (exc.stderr or "")[-max_output:] if isinstance(exc.stderr, str) else "",
+            "error": f"command timed out after {timeout:g} seconds",
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+    stdout = process.stdout
+    stderr = process.stderr
+    truncated = len(stdout) > max_output or len(stderr) > max_output
+    if len(stdout) > max_output:
+        stdout = stdout[-max_output:]
+    if len(stderr) > max_output:
+        stderr = stderr[-max_output:]
+    return {
+        "available": True,
+        "ok": process.returncode == 0,
+        "returncode": process.returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "error": stderr.strip() if process.returncode else None,
+        "truncated": truncated,
+        "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+    }
+
+
+def _finding(
+    code: str,
+    severity: str,
+    summary: str,
+    evidence: Optional[str] = None,
+    recommendation: Optional[str] = None,
+) -> Dict[str, Any]:
+    item: Dict[str, Any] = {
+        "code": code,
+        "severity": severity,
+        "summary": summary,
+    }
+    if evidence:
+        item["evidence"] = evidence
+    if recommendation:
+        item["recommendation"] = recommendation
+    return item
+
+
+def _deduplicate_findings(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result = []
+    seen = set()
+    for finding in findings:
+        key = (finding.get("code"), finding.get("summary"), finding.get("evidence"))
+        if key not in seen:
+            seen.add(key)
+            result.append(finding)
+    return result
+
+
+def _diagnostic_status(findings: List[Dict[str, Any]]) -> str:
+    severities = {finding.get("severity") for finding in findings}
+    if "critical" in severities:
+        return "failed"
+    if "warning" in severities:
+        return "warning"
+    return "ok"
+
+
+def _redact_log_line(line: str) -> str:
+    redacted = re.sub(
+        r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+",
+        r"\1: [REDACTED]",
+        line,
+    )
+    redacted = re.sub(
+        r"(?i)([?&](?:access_?token|api_?key|auth|code|credential|jwt|password|secret|session|signature|token)=)[^&\s\"']+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)(\b(?:access_?token|api_?key|auth|credential|jwt|password|secret|session|signature|token)\s*=\s*)[^&\s\"']+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)(--(?:access-?token|api-?key|auth|credential|jwt|password|secret|session|signature|token)\s+)[^\s\"']+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+        "[REDACTED_JWT]",
+        redacted,
+    )
+    return redacted
+
+
+def _redact_url(value: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        hostname = parsed.hostname or ""
+        if ":" in hostname and not hostname.startswith("["):
+            hostname = f"[{hostname}]"
+        if parsed.port:
+            hostname = f"{hostname}:{parsed.port}"
+        if parsed.username is not None or parsed.password is not None:
+            hostname = f"[REDACTED]@{hostname}"
+        query = _redact_log_line(f"?{parsed.query}")[1:] if parsed.query else ""
+        return urllib.parse.urlunsplit((parsed.scheme, hostname, parsed.path, query, parsed.fragment))
+    except ValueError:
+        return _redact_log_line(value)
+
+
+def _validate_log_options(lines: int, since: str) -> None:
+    if not 1 <= lines <= DIAGNOSTIC_MAX_LOG_LINES:
+        raise ValueError(
+            f"Log line count must be between 1 and {DIAGNOSTIC_MAX_LOG_LINES}"
+        )
+    if not since or len(since) > 80 or any(ord(char) < 32 for char in since):
+        raise ValueError("Invalid journal time range")
+
+
+def _tail_log_file(
+    path: str,
+    lines: int = 50,
+    include_content: bool = False,
+    raw: bool = False,
+) -> Dict[str, Any]:
+    candidate = Path(path).expanduser()
+    result: Dict[str, Any] = {"path": str(candidate), "exists": candidate.is_file()}
+    if not candidate.is_file():
+        return result
+    try:
+        details = candidate.stat()
+        result.update({
+            "size_bytes": details.st_size,
+            "modified_at": datetime.fromtimestamp(
+                details.st_mtime, timezone.utc
+            ).isoformat(),
+            "readable": os.access(candidate, os.R_OK),
+        })
+        if not include_content:
+            return result
+        read_size = min(details.st_size, max(65536, lines * 4096), DIAGNOSTIC_MAX_OUTPUT)
+        with candidate.open("rb") as handle:
+            if details.st_size > read_size:
+                handle.seek(-read_size, os.SEEK_END)
+            data = handle.read(read_size)
+        decoded = data.decode("utf-8", errors="replace")
+        selected = decoded.splitlines()[-lines:]
+        result["lines"] = selected if raw else [_redact_log_line(line) for line in selected]
+        result["truncated"] = details.st_size > read_size
+    except OSError as exc:
+        result.update({"readable": False, "error": str(exc)})
+    return result
+
+
+def _mount_details(path: Path) -> Optional[Dict[str, Any]]:
+    mounts = Path("/proc/self/mounts")
+    if not mounts.is_file():
+        return None
+    try:
+        resolved = str(path.resolve())
+        matches = []
+        for line in mounts.read_text(encoding="utf-8", errors="replace").splitlines():
+            fields = line.split()
+            if len(fields) < 4:
+                continue
+            mountpoint = fields[1].replace("\\040", " ")
+            if resolved == mountpoint or resolved.startswith(mountpoint.rstrip("/") + "/"):
+                matches.append((len(mountpoint), fields[0], mountpoint, fields[2], fields[3]))
+        if not matches:
+            return None
+        _, device, mountpoint, filesystem, options = max(matches)
+        return {
+            "device": device,
+            "mountpoint": mountpoint,
+            "filesystem": filesystem,
+            "options": options.split(","),
+            "read_only": "ro" in options.split(","),
+        }
+    except OSError:
+        return None
+
+
+def disk_diagnostic(
+    path: str = "/",
+    include_du: bool = False,
+    timeout: float = 30.0,
+    warning_percent: float = 85.0,
+    critical_percent: float = 95.0,
+) -> Dict[str, Any]:
+    """Inspect capacity, inodes, mount state, and optional top-level usage."""
+    if not 0 < warning_percent < critical_percent <= 100:
+        raise ValueError("Disk thresholds must satisfy 0 < warning < critical <= 100")
+    candidate = Path(path).expanduser()
+    if not candidate.exists():
+        finding = _finding(
+            "path_missing", "critical", f"Path does not exist: {candidate}",
+            recommendation="Check the mount point or path supplied to the diagnostic.",
+        )
+        return {"path": str(candidate), "status": "failed", "findings": [finding]}
+    measured = candidate if candidate.is_dir() else candidate.parent
+    usage = shutil.disk_usage(measured)
+    used_percent = round((usage.used / usage.total) * 100, 2) if usage.total else 0.0
+    inode_total = None
+    inode_free = None
+    inode_used_percent = None
+    try:
+        filesystem = os.statvfs(measured)
+        if filesystem.f_files:
+            inode_total = filesystem.f_files
+            inode_free = filesystem.f_ffree
+            inode_used_percent = round(
+                ((inode_total - inode_free) / inode_total) * 100, 2
+            )
+    except (AttributeError, OSError):
+        pass
+    findings = []
+    for metric, percent in (("disk", used_percent), ("inode", inode_used_percent)):
+        if percent is None:
+            continue
+        if percent >= critical_percent:
+            findings.append(_finding(
+                f"{metric}_critical", "critical",
+                f"{metric.capitalize()} usage is critically high ({percent}%).",
+                recommendation="Free space or inodes, rotate logs, and identify growth before restarting services.",
+            ))
+        elif percent >= warning_percent:
+            findings.append(_finding(
+                f"{metric}_warning", "warning",
+                f"{metric.capitalize()} usage is high ({percent}%).",
+                recommendation="Review growth and available capacity before the filesystem becomes full.",
+            ))
+    mount = _mount_details(measured)
+    if mount and mount.get("read_only"):
+        findings.append(_finding(
+            "filesystem_read_only", "critical",
+            f"Filesystem mounted at {mount['mountpoint']} is read-only.",
+            recommendation="Inspect kernel and storage errors before attempting a remount.",
+        ))
+    largest = []
+    du_error = None
+    if include_du:
+        command = ["du", "-x", "-k", "-d", "1", str(measured.resolve())]
+        du = _diagnostic_command(command, timeout=timeout)
+        if du["ok"]:
+            rows = []
+            for line in du["stdout"].splitlines():
+                match = re.match(r"^(\d+)\s+(.+)$", line)
+                if match and Path(match.group(2)) != measured:
+                    rows.append({"path": match.group(2), "size_bytes": int(match.group(1)) * 1024})
+            largest = sorted(rows, key=lambda row: row["size_bytes"], reverse=True)[:20]
+        else:
+            du_error = du.get("error") or "du failed"
+            findings.append(_finding(
+                "du_unavailable", "warning", "Top-level usage could not be collected.",
+                evidence=du_error,
+                recommendation="Run the same diagnostic with sufficient read permissions or inspect the path manually.",
+            ))
+    findings = _deduplicate_findings(findings)
+    return {
+        "path": str(candidate),
+        "measured_path": str(measured),
+        "status": _diagnostic_status(findings),
+        "capacity": {
+            "total_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+            "used_percent": used_percent,
+        },
+        "inodes": {
+            "total": inode_total,
+            "free": inode_free,
+            "used_percent": inode_used_percent,
+        },
+        "mount": mount,
+        "writable_by_current_user": os.access(measured, os.W_OK),
+        "largest_entries": largest,
+        "du_error": du_error,
+        "findings": findings,
+    }
+
+
+def _process_matches(name: str, timeout: float = 5.0) -> List[Dict[str, Any]]:
+    process_name = name.removesuffix(".service")
+    _validate_config_name(process_name, "process name", max_length=128)
+    command = _diagnostic_command(["pgrep", "-a", "-x", process_name], timeout=timeout)
+    matches = []
+    if command["ok"]:
+        for line in command["stdout"].splitlines():
+            pid, _, arguments = line.strip().partition(" ")
+            if pid.isdigit():
+                matches.append({"pid": int(pid), "command": _redact_log_line(arguments)})
+    return matches
+
+
+def _service_manager() -> str:
+    system = platform.system().lower()
+    if system == "linux":
+        if shutil.which("systemctl"):
+            return "systemd"
+        if shutil.which("rc-service"):
+            return "openrc"
+        if shutil.which("service"):
+            return "sysv"
+    elif system == "darwin":
+        return "launchd"
+    elif system == "windows":
+        return "windows-scm"
+    return "unknown"
+
+
+def service_diagnostic(
+    name: str,
+    include_logs: bool = False,
+    lines: int = 50,
+    since: str = "1 hour ago",
+    raw_logs: bool = False,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    """Inspect a service without starting, stopping, or reloading it."""
+    _validate_config_name(name.removesuffix(".service"), "service name", max_length=128)
+    _validate_log_options(lines, since)
+    manager = _service_manager()
+    details: Dict[str, Any] = {}
+    findings = []
+    journal: List[str] = []
+    log_source = None
+    if manager == "systemd":
+        properties = (
+            "LoadState,ActiveState,SubState,UnitFileState,Result,ExecMainStatus,"
+            "FragmentPath,User,Group,MainPID,NRestarts,MemoryCurrent,TasksCurrent"
+        )
+        command = _diagnostic_command(
+            ["systemctl", "show", name, "--no-pager", f"--property={properties}"],
+            timeout=timeout,
+        )
+        for line in command["stdout"].splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                details[key] = value or None
+        load_state = details.get("LoadState")
+        active_state = details.get("ActiveState")
+        if not command["ok"] and not details:
+            findings.append(_finding(
+                "service_query_failed", "critical", f"Service state for '{name}' could not be queried.",
+                evidence=command.get("error"),
+                recommendation="Check service-manager availability, permissions, and whether the host booted with systemd.",
+            ))
+        elif load_state == "not-found":
+            findings.append(_finding(
+                "service_not_found", "critical", f"Service unit '{name}' was not found.",
+                recommendation="Confirm the package, unit name, and installation path.",
+            ))
+        elif active_state != "active":
+            findings.append(_finding(
+                "service_inactive", "critical", f"Service '{name}' is not active.",
+                evidence=f"ActiveState={active_state}, SubState={details.get('SubState')}, Result={details.get('Result')}",
+                recommendation="Review configuration and service logs before attempting a restart.",
+            ))
+        if details.get("ExecMainStatus") not in {None, "", "0"}:
+            findings.append(_finding(
+                "service_exit_status", "warning",
+                f"The last main process exit status was {details['ExecMainStatus']}.",
+                recommendation="Correlate the exit code with the unit journal and application logs.",
+            ))
+        if include_logs:
+            log_source = "journalctl"
+            log_command = _diagnostic_command(
+                [
+                    "journalctl", "--no-pager", "-u", name,
+                    "--since", since, "-n", str(lines), "-o", "short-iso",
+                ],
+                timeout=timeout,
+            )
+            selected = log_command["stdout"].splitlines()[-lines:]
+            journal = selected if raw_logs else [_redact_log_line(line) for line in selected]
+            if not log_command["ok"] and log_command.get("error"):
+                findings.append(_finding(
+                    "service_logs_unavailable", "warning", "Service journal could not be read.",
+                    evidence=log_command["error"],
+                    recommendation="Check journal access for the current user.",
+                ))
+    elif manager == "openrc":
+        command = _diagnostic_command(["rc-service", name, "status"], timeout=timeout)
+        details = {"output": _redact_log_line((command["stdout"] + command["stderr"]).strip())}
+        if not command["ok"]:
+            findings.append(_finding(
+                "service_inactive", "critical", f"OpenRC reports '{name}' as unavailable or stopped.",
+                evidence=details["output"],
+                recommendation="Review the application configuration and OpenRC log destination.",
+            ))
+    elif manager == "sysv":
+        command = _diagnostic_command(["service", name, "status"], timeout=timeout)
+        details = {"output": _redact_log_line((command["stdout"] + command["stderr"]).strip())}
+        if not command["ok"]:
+            findings.append(_finding(
+                "service_inactive", "critical", f"Service '{name}' is unavailable or stopped.",
+                evidence=details["output"],
+                recommendation="Review the application configuration and service log destination.",
+            ))
+    elif manager == "launchd":
+        command = _diagnostic_command(["launchctl", "print", f"system/{name}"], timeout=timeout)
+        details = {"output": _redact_log_line(command["stdout"][-8192:])}
+        if not command["ok"]:
+            findings.append(_finding(
+                "service_inactive", "critical", f"launchd could not find an active '{name}' service.",
+                recommendation="Confirm the launchd label and inspect its configured log paths.",
+            ))
+    elif manager == "windows-scm":
+        command = _diagnostic_command(["sc", "query", name], timeout=timeout)
+        details = {"output": _redact_log_line(command["stdout"][-8192:])}
+        if not command["ok"] or "RUNNING" not in command["stdout"].upper():
+            findings.append(_finding(
+                "service_inactive", "critical", f"Windows Service Control Manager does not report '{name}' as running.",
+                evidence=_redact_log_line((command["stdout"] + command["stderr"]).strip()),
+                recommendation="Confirm the service name and review the Windows Event Log.",
+            ))
+    else:
+        findings.append(_finding(
+            "service_manager_unavailable", "warning", "No supported service manager was detected.",
+            recommendation="Use the process list and application-specific diagnostics.",
+        ))
+    if include_logs and manager != "systemd":
+        findings.append(_finding(
+            "service_log_source_unspecified", "info",
+            f"Automatic service-log collection is not defined for {manager}.",
+            recommendation="Use the log path configured by the application or the platform event-log viewer.",
+        ))
+    processes = _process_matches(name, timeout) if platform.system().lower() != "windows" else []
+    findings = _deduplicate_findings(findings)
+    return {
+        "service": name,
+        "manager": manager,
+        "status": _diagnostic_status(findings),
+        "details": details,
+        "processes": processes,
+        "journal": journal,
+        "logs_requested": include_logs,
+        "logs_collected": bool(journal),
+        "log_source": log_source,
+        "logs_included": include_logs,
+        "logs_redacted": include_logs and not raw_logs,
+        "findings": findings,
+    }
+
+
+def _proc_memory() -> Dict[str, Any]:
+    path = Path("/proc/meminfo")
+    if not path.is_file():
+        if platform.system().lower() == "windows":
+            try:
+                import ctypes
+
+                class MemoryStatus(ctypes.Structure):
+                    _fields_ = [
+                        ("length", ctypes.c_ulong), ("memory_load", ctypes.c_ulong),
+                        ("total_physical", ctypes.c_ulonglong), ("available_physical", ctypes.c_ulonglong),
+                        ("total_page_file", ctypes.c_ulonglong), ("available_page_file", ctypes.c_ulonglong),
+                        ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                        ("available_extended_virtual", ctypes.c_ulonglong),
+                    ]
+
+                status = MemoryStatus()
+                status.length = ctypes.sizeof(MemoryStatus)
+                windll = getattr(ctypes, "windll", None)
+                if windll and windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                    return {
+                        "total_bytes": status.total_physical,
+                        "available_bytes": status.available_physical,
+                        "available_percent": round(status.available_physical / status.total_physical * 100, 2),
+                        "swap_total_bytes": None, "swap_used_bytes": None, "swap_used_percent": None,
+                    }
+            except (AttributeError, OSError, ZeroDivisionError):
+                return {}
+        try:
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            total = os.sysconf("SC_PHYS_PAGES") * page_size
+            available = os.sysconf("SC_AVPHYS_PAGES") * page_size
+            return {
+                "total_bytes": total, "available_bytes": available,
+                "available_percent": round(available / total * 100, 2) if total else None,
+                "swap_total_bytes": None, "swap_used_bytes": None, "swap_used_percent": None,
+            }
+        except (AttributeError, OSError, ValueError):
+            return {}
+    values: Dict[str, int] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, separator, value = line.partition(":")
+            if not separator:
+                continue
+            match = re.match(r"\s*(\d+)", value)
+            if match:
+                values[key] = int(match.group(1)) * 1024
+    except OSError:
+        return {}
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", values.get("MemFree", 0))
+    swap_total = values.get("SwapTotal", 0)
+    swap_free = values.get("SwapFree", 0)
+    return {
+        "total_bytes": total,
+        "available_bytes": available,
+        "available_percent": round(available / total * 100, 2) if total else None,
+        "swap_total_bytes": swap_total,
+        "swap_used_bytes": max(0, swap_total - swap_free),
+        "swap_used_percent": round((swap_total - swap_free) / swap_total * 100, 2) if swap_total else 0.0,
+    }
+
+
+def _linux_pressure() -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for resource in ("cpu", "memory", "io"):
+        path = Path("/proc/pressure") / resource
+        if not path.is_file():
+            continue
+        rows: Dict[str, Any] = {}
+        try:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                fields = line.split()
+                if not fields:
+                    continue
+                metrics: Dict[str, Any] = {}
+                for field in fields[1:]:
+                    key, separator, value = field.partition("=")
+                    if separator:
+                        metrics[key] = float(value) if key.startswith("avg") else int(value)
+                rows[fields[0]] = metrics
+        except (OSError, ValueError):
+            continue
+        result[resource] = rows
+    return result
+
+
+def _process_summary() -> Dict[str, Any]:
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return {}
+    total = 0
+    zombies = 0
+    unreadable = 0
+    try:
+        entries = proc.iterdir()
+    except OSError:
+        return {}
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        total += 1
+        try:
+            value = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+            closing = value.rfind(")")
+            state = value[closing + 2:closing + 3] if closing >= 0 else ""
+            if state == "Z":
+                zombies += 1
+        except OSError:
+            unreadable += 1
+    return {"total": total, "zombies": zombies, "unreadable": unreadable}
+
+
+def _time_sync_status(timeout: float) -> Dict[str, Any]:
+    if shutil.which("timedatectl"):
+        command = _diagnostic_command(
+            ["timedatectl", "show", "--property=NTPSynchronized", "--property=NTP", "--property=Timezone"],
+            timeout=timeout,
+        )
+        values: Dict[str, Any] = {}
+        for line in command["stdout"].splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key] = value
+        return {
+            "available": command["available"], "source": "timedatectl", "ok": command["ok"],
+            "synchronized": values.get("NTPSynchronized") == "yes" if command["ok"] else None,
+            "properties": values, "error": command.get("error") if not command["ok"] else None,
+        }
+    if shutil.which("chronyc"):
+        command = _diagnostic_command(["chronyc", "tracking"], timeout=timeout)
+        leap = re.search(r"^Leap status\s*:\s*(.+)$", command["stdout"], re.MULTILINE | re.IGNORECASE)
+        return {
+            "available": True, "source": "chronyc", "ok": command["ok"],
+            "synchronized": bool(leap and leap.group(1).strip().lower() == "normal") if command["ok"] else None,
+            "summary": _redact_log_line(command["stdout"][-8192:]),
+            "error": command.get("error") if not command["ok"] else None,
+        }
+    if shutil.which("ntpq"):
+        command = _diagnostic_command(["ntpq", "-pn"], timeout=timeout)
+        synchronized = any(line.startswith("*") for line in command["stdout"].splitlines())
+        return {
+            "available": True, "source": "ntpq", "ok": command["ok"],
+            "synchronized": synchronized if command["ok"] else None,
+            "summary": command["stdout"][-8192:],
+            "error": command.get("error") if not command["ok"] else None,
+        }
+    if platform.system().lower() == "windows" and shutil.which("w32tm"):
+        command = _diagnostic_command(["w32tm", "/query", "/status"], timeout=timeout)
+        return {
+            "available": True, "source": "w32tm", "ok": command["ok"],
+            "synchronized": command["ok"], "summary": command["stdout"][-8192:],
+            "error": command.get("error") if not command["ok"] else None,
+        }
+    return {"available": False, "source": None, "synchronized": None}
+
+
+def _listening_sockets(timeout: float = 5.0) -> Dict[str, Any]:
+    if shutil.which("ss"):
+        command = _diagnostic_command(["ss", "-H", "-lntu"], timeout=timeout)
+        source = "ss"
+    elif shutil.which("netstat"):
+        command = _diagnostic_command(["netstat", "-an"], timeout=timeout)
+        source = "netstat"
+    else:
+        return {"available": False, "source": None, "listeners": []}
+    listeners = []
+    for line in command["stdout"].splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        protocol = fields[0].lower()
+        if source == "netstat" and "listen" not in line.lower() and not protocol.startswith("udp"):
+            continue
+        local = ""
+        if source == "ss" and len(fields) >= 5:
+            local = fields[4]
+        elif source == "netstat" and len(fields) >= 4:
+            local = fields[3]
+        match = re.search(r"(?:\]|:|\.)(\d+)$", local)
+        listeners.append({
+            "protocol": protocol,
+            "local_address": local,
+            "port": int(match.group(1)) if match else None,
+        })
+        if len(listeners) >= 1000:
+            break
+    return {
+        "available": command["available"],
+        "source": source,
+        "listeners": listeners,
+        "truncated": len(listeners) >= 1000,
+        "error": command.get("error") if not command["ok"] else None,
+    }
+
+
+def network_diagnostic(
+    probe: Optional[str] = None,
+    port: int = 443,
+    timeout: float = 5.0,
+) -> Dict[str, Any]:
+    """Inspect local networking and optionally test one DNS/TCP endpoint."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    _validate_port(port)
+    inventory = local_network_inventory()
+    listeners = _listening_sockets(timeout)
+    findings = []
+    if not inventory.get("default_routes"):
+        findings.append(_finding(
+            "default_route_missing", "warning", "No default route was detected.",
+            recommendation="Check interface state, addressing, and the expected routing table.",
+        ))
+    if not inventory.get("dns_servers"):
+        findings.append(_finding(
+            "dns_servers_missing", "warning", "No DNS resolver was detected.",
+            recommendation="Inspect the resolver configuration and network manager state.",
+        ))
+    checks: Dict[str, Any] = {}
+    if probe:
+        endpoint = parse_endpoint(probe, default_port=port)
+        checks["dns"] = resolve_all(endpoint["host"], timeout)
+        checks["tcp"] = tcp_probe(endpoint["host"], endpoint["port"], timeout)
+        if checks["dns"]["status"] != "ok":
+            findings.append(_finding(
+                "probe_dns_failed", "critical", f"DNS resolution failed for {endpoint['host']}.",
+                evidence=checks["dns"].get("error"),
+                recommendation="Check the resolver, search domains, and authoritative DNS records.",
+            ))
+        if checks["tcp"]["status"] != "ok":
+            findings.append(_finding(
+                "probe_tcp_failed", "critical",
+                f"TCP connection to {endpoint['host']}:{endpoint['port']} failed.",
+                evidence=checks["tcp"].get("error"),
+                recommendation="Check routing, firewall policy, listener state, and the target service.",
+            ))
+    findings = _deduplicate_findings(findings)
+    return {
+        "status": _diagnostic_status(findings),
+        "platform": platform.system(),
+        "inventory": inventory,
+        "listening_sockets": listeners,
+        "probe": probe,
+        "checks": checks,
+        "findings": findings,
+    }
+
+
+def system_diagnostic(
+    path: str = "/",
+    include_du: bool = False,
+    include_logs: bool = False,
+    lines: int = 50,
+    since: str = "1 hour ago",
+    raw_logs: bool = False,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    """Collect a read-only host health overview with actionable findings."""
+    _validate_log_options(lines, since)
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    cpu_count = os.cpu_count() or 1
+    load = None
+    try:
+        one, five, fifteen = os.getloadavg()
+        load = {
+            "one_minute": round(one, 2), "five_minutes": round(five, 2),
+            "fifteen_minutes": round(fifteen, 2),
+            "one_minute_per_cpu": round(one / cpu_count, 2),
+        }
+    except (AttributeError, OSError):
+        pass
+    uptime_seconds = None
+    try:
+        uptime_seconds = float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        pass
+    memory = _proc_memory()
+    pressure = _linux_pressure()
+    processes = _process_summary()
+    time_sync = _time_sync_status(timeout)
+    disk = disk_diagnostic(path, include_du=include_du, timeout=max(timeout, 30.0))
+    network = network_diagnostic(timeout=timeout)
+    findings = list(disk["findings"]) + list(network["findings"])
+    if load and load["one_minute_per_cpu"] >= 2:
+        findings.append(_finding(
+            "load_critical", "critical", "One-minute load is at least twice the CPU count.",
+            evidence=f"normalized load={load['one_minute_per_cpu']}",
+            recommendation="Inspect runnable and uninterruptible processes, I/O pressure, and recent workload changes.",
+        ))
+    elif load and load["one_minute_per_cpu"] >= 1.2:
+        findings.append(_finding(
+            "load_high", "warning", "One-minute load is above the CPU count.",
+            evidence=f"normalized load={load['one_minute_per_cpu']}",
+            recommendation="Correlate CPU, I/O wait, and process activity before capacity is exhausted.",
+        ))
+    available_percent = memory.get("available_percent")
+    if available_percent is not None and available_percent < 5:
+        findings.append(_finding(
+            "memory_critical", "critical", f"Available memory is critically low ({available_percent}%).",
+            recommendation="Identify memory growth and OOM events before restarting or terminating a process.",
+        ))
+    elif available_percent is not None and available_percent < 10:
+        findings.append(_finding(
+            "memory_low", "warning", f"Available memory is low ({available_percent}%).",
+            recommendation="Inspect working sets, cache pressure, swap activity, and recent growth.",
+        ))
+    swap_used_percent = memory.get("swap_used_percent")
+    if isinstance(swap_used_percent, (int, float)) and swap_used_percent >= 90:
+        findings.append(_finding(
+            "swap_high", "warning", f"Swap usage is high ({memory['swap_used_percent']}%).",
+            recommendation="Check whether swap-in activity is current before treating allocated swap as active pressure.",
+        ))
+    if processes.get("zombies", 0):
+        zombie_count = processes["zombies"]
+        findings.append(_finding(
+            "zombie_processes", "warning" if zombie_count >= 5 else "info",
+            f"{zombie_count} zombie process(es) detected.",
+            recommendation="Identify and diagnose the parent process responsible for reaping child exit status.",
+        ))
+    if time_sync.get("ok") and time_sync.get("synchronized") is False:
+        findings.append(_finding(
+            "time_not_synchronized", "warning", "The service manager reports that system time is not synchronized.",
+            recommendation="Check the configured NTP client, source reachability, offset, and recent clock changes.",
+        ))
+    for resource, rows in pressure.items():
+        full_avg10 = rows.get("full", {}).get("avg10", 0)
+        if full_avg10 >= 10:
+            findings.append(_finding(
+                f"{resource}_pressure", "warning",
+                f"Sustained {resource} pressure is elevated (full avg10={full_avg10}).",
+                recommendation="Correlate pressure stalls with processes and resource saturation.",
+            ))
+    failed_services: List[str] = []
+    if _service_manager() == "systemd":
+        command = _diagnostic_command(
+            ["systemctl", "--failed", "--no-legend", "--plain", "--no-pager"],
+            timeout=timeout,
+        )
+        if command["ok"]:
+            failed_services = [line.strip() for line in command["stdout"].splitlines() if line.strip()][:100]
+            if failed_services:
+                findings.append(_finding(
+                    "failed_services", "warning", f"{len(failed_services)} failed systemd unit(s) detected.",
+                    recommendation="Run a targeted service diagnostic and inspect its journal before changing state.",
+                ))
+    journal: List[str] = []
+    if include_logs:
+        if shutil.which("journalctl"):
+            command = _diagnostic_command(
+                ["journalctl", "--no-pager", "-b", "-p", "emerg..err", "--since", since,
+                 "-n", str(lines), "-o", "short-iso"],
+                timeout=timeout,
+            )
+            selected = command["stdout"].splitlines()[-lines:]
+            journal = selected if raw_logs else [_redact_log_line(line) for line in selected]
+            if not command["ok"]:
+                findings.append(_finding(
+                    "system_logs_unavailable", "warning", "System journal could not be read.",
+                    evidence=command.get("error"), recommendation="Check journal permissions for the current user.",
+                ))
+        else:
+            findings.append(_finding(
+                "system_log_source_unavailable", "info", "journalctl is not available on this host.",
+                recommendation="Inspect the platform's configured system log destination.",
+            ))
+    findings = _deduplicate_findings(findings)
+    return {
+        "status": _diagnostic_status(findings),
+        "host": {
+            "hostname": socket.gethostname(), "platform": platform.system(),
+            "release": platform.release(), "architecture": platform.machine(),
+            "python": platform.python_version(), "cpu_count": cpu_count,
+            "uptime_seconds": uptime_seconds,
+        },
+        "load": load,
+        "memory": memory,
+        "pressure": pressure,
+        "processes": processes,
+        "time_sync": time_sync,
+        "disk": disk,
+        "network": network,
+        "failed_services": failed_services,
+        "journal": journal,
+        "logs_requested": include_logs,
+        "logs_collected": bool(journal),
+        "log_source": "journalctl" if include_logs and shutil.which("journalctl") else None,
+        "logs_included": include_logs,
+        "logs_redacted": include_logs and not raw_logs,
+        "findings": findings,
+    }
+
+
+def _nginx_build_details(text: str) -> Dict[str, Any]:
+    details: Dict[str, Any] = {"raw_version": None, "configure_arguments": {}}
+    version = re.search(r"nginx version:\s*nginx/([^\s]+)", text)
+    if version:
+        details["version"] = version.group(1)
+        details["raw_version"] = version.group(0)
+    arguments = re.search(r"configure arguments:\s*(.+)", text)
+    if arguments:
+        try:
+            tokens = shlex.split(arguments.group(1))
+        except ValueError:
+            tokens = arguments.group(1).split()
+        for token in tokens:
+            if token.startswith("--"):
+                key, separator, value = token[2:].partition("=")
+                details["configure_arguments"][key] = value if separator else True
+    return details
+
+
+def _nginx_resolve_path(value: str, prefix: str) -> Optional[str]:
+    value = value.strip().strip('"\'')
+    if not value or value in {"off", "stderr"} or value.startswith("syslog:") or "$" in value:
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return str(PureWindowsPath(value))
+    if value.startswith("/"):
+        return str(PurePosixPath(value))
+    if re.match(r"^[A-Za-z]:[\\/]", prefix):
+        return str(PureWindowsPath(prefix) / PureWindowsPath(value))
+    if prefix.startswith("/"):
+        return str(PurePosixPath(prefix) / PurePosixPath(value))
+    return str(Path(prefix) / Path(value))
+
+
+def _strip_nginx_comments(text: str) -> str:
+    cleaned = []
+    for line in text.splitlines():
+        quote = None
+        escaped = False
+        output_line = []
+        for char in line:
+            if escaped:
+                output_line.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                output_line.append(char)
+                escaped = True
+                continue
+            if char in {'"', "'"}:
+                quote = None if quote == char else char if quote is None else quote
+            if char == "#" and quote is None:
+                break
+            output_line.append(char)
+        cleaned.append("".join(output_line))
+    return "\n".join(cleaned)
+
+
+def _redact_nginx_endpoint(value: str) -> str:
+    value = re.sub(r"(://)[^/@\s]+@", r"\1[REDACTED]@", value)
+    return _redact_log_line(value)
+
+
+def _parse_nginx_configuration(text: str, build: Dict[str, Any]) -> Dict[str, Any]:
+    arguments = build.get("configure_arguments", {})
+    prefix = str(arguments.get("prefix") or "/usr/local/nginx")
+    config_files = re.findall(r"^# configuration file (.+):$", text, re.MULTILINE)
+    directives: Dict[str, List[str]] = {
+        name: [] for name in (
+            "user", "pid", "error_log", "access_log", "root", "alias", "index", "listen",
+            "server_name", "ssl_certificate", "ssl_certificate_key", "proxy_pass", "fastcgi_pass",
+        )
+    }
+    names = "|".join(re.escape(name) for name in directives)
+    cleaned = _strip_nginx_comments(text)
+    for match in re.finditer(rf"(?m)^\s*({names})\s+([^;]+);", cleaned):
+        directives[match.group(1)].append(" ".join(match.group(2).split()))
+    worker_user = None
+    worker_group = None
+    if directives["user"]:
+        fields = directives["user"][0].split()
+        worker_user = fields[0] if fields else None
+        worker_group = fields[1] if len(fields) > 1 else None
+    paths: Dict[str, List[str]] = {
+        "roots": [], "aliases": [], "error_logs": [], "access_logs": [], "certificates": [],
+    }
+    for key, destination in (("root", "roots"), ("alias", "aliases")):
+        for root in directives[key]:
+            resolved = _nginx_resolve_path(root, prefix)
+            if resolved:
+                paths[destination].append(resolved)
+    for key, destination in (("error_log", "error_logs"), ("access_log", "access_logs")):
+        for value in directives[key]:
+            try:
+                first = shlex.split(value)[0]
+            except (ValueError, IndexError):
+                first = value.split()[0] if value.split() else ""
+            resolved = _nginx_resolve_path(first, prefix)
+            if resolved:
+                paths[destination].append(resolved)
+    for key in ("ssl_certificate", "ssl_certificate_key"):
+        for value in directives[key]:
+            resolved = _nginx_resolve_path(value.split()[0], prefix)
+            if resolved:
+                paths["certificates"].append(resolved)
+    ports = []
+    for value in directives["listen"]:
+        endpoint = value.split()[0]
+        listen_match = re.search(r"(?:\]|:)(\d+)$", endpoint)
+        if not listen_match:
+            listen_match = re.match(r"^(\d+)$", endpoint)
+        if listen_match:
+            port = int(listen_match.group(1))
+            if port not in ports:
+                ports.append(port)
+    return {
+        "prefix": prefix,
+        "config_files": list(dict.fromkeys(config_files)),
+        "worker_user": worker_user,
+        "worker_group": worker_group,
+        "paths": {key: list(dict.fromkeys(values)) for key, values in paths.items()},
+        "listen_ports": ports,
+        "explicit_error_log": bool(directives["error_log"]),
+        "explicit_access_log": bool(directives["access_log"]),
+        "server_names": list(dict.fromkeys(directives["server_name"])),
+        "upstreams": list(dict.fromkeys(
+            _redact_nginx_endpoint(value)
+            for value in directives["proxy_pass"] + directives["fastcgi_pass"]
+        )),
+    }
+
+
+def _path_access_for_user(
+    path: str,
+    username: Optional[str],
+    groupname: Optional[str] = None,
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "path": path, "user": username, "group": groupname, "exists": Path(path).exists(),
+    }
+    if not username or platform.system().lower() == "windows":
+        return result
+    try:
+        import grp
+        import pwd
+        account = pwd.getpwnam(username)
+        group_ids = {account.pw_gid}
+        group_ids.update(entry.gr_gid for entry in grp.getgrall() if username in entry.gr_mem)
+        if groupname:
+            group_ids.add(grp.getgrnam(groupname).gr_gid)
+    except (ImportError, KeyError, OSError):
+        result["error"] = f"user not found or account database unavailable: {username}"
+        return result
+    candidate = Path(path)
+    chain = list(candidate.parents)
+    if candidate.exists() and candidate.is_dir():
+        chain.insert(0, candidate)
+    blocker: Optional[Dict[str, Any]] = None
+    for directory in reversed(chain):
+        if not directory.exists():
+            continue
+        try:
+            details = directory.stat()
+        except OSError as exc:
+            blocker = {"path": str(directory), "error": str(exc)}
+            break
+        if account.pw_uid == 0:
+            allowed = True
+        elif details.st_uid == account.pw_uid:
+            allowed = bool(details.st_mode & stat.S_IXUSR)
+        elif details.st_gid in group_ids:
+            allowed = bool(details.st_mode & stat.S_IXGRP)
+        else:
+            allowed = bool(details.st_mode & stat.S_IXOTH)
+        if not allowed:
+            blocker = {
+                "path": str(directory), "mode": oct(stat.S_IMODE(details.st_mode)),
+                "uid": details.st_uid, "gid": details.st_gid,
+            }
+            break
+    result["traversable"] = blocker is None
+    result["blocker"] = blocker
+    result["caveat"] = "POSIX mode-bit check; ACL and security-module policy are evaluated separately."
+    return result
+
+
+def _security_frameworks(paths: List[str], timeout: float) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"selinux": None, "apparmor": None, "path_contexts": []}
+    if shutil.which("getenforce"):
+        command = _diagnostic_command(["getenforce"], timeout=timeout)
+        result["selinux"] = command["stdout"].strip() or command.get("error")
+    apparmor = Path("/sys/module/apparmor/parameters/enabled")
+    if apparmor.is_file():
+        try:
+            result["apparmor"] = apparmor.read_text().strip()
+        except OSError:
+            result["apparmor"] = "unknown"
+    if paths and shutil.which("ls"):
+        for path in paths[:50]:
+            command = _diagnostic_command(["ls", "-Zd", path], timeout=timeout, max_output=8192)
+            if command["ok"]:
+                result["path_contexts"].append(command["stdout"].strip())
+    return result
+
+
+def _nginx_log_findings(error_lines: List[str], access_lines: List[str]) -> List[Dict[str, Any]]:
+    findings = []
+    error_text = "\n".join(error_lines).lower()
+    signatures = [
+        ("permission denied", "nginx_permission_denied", "critical", "Nginx logged a permission denial.", "Check every parent-directory execute bit, file read access, ACLs, SELinux, and AppArmor policy."),
+        ("directory index of", "nginx_directory_index", "warning", "A directory index request was forbidden.", "Confirm the intended index file or explicitly configure directory listing only where appropriate."),
+        ("access forbidden by rule", "nginx_access_rule", "warning", "An Nginx access rule rejected a request.", "Review allow/deny, auth, and location precedence for the affected URI."),
+        ("no such file or directory", "nginx_path_missing", "warning", "Nginx referenced a missing path.", "Confirm root/alias resolution, deployment output, includes, certificates, and socket paths."),
+        ("connect() failed", "nginx_upstream_connect", "critical", "Nginx could not connect to an upstream.", "Check the upstream service, socket permissions, address family, port, and security policy."),
+        ("upstream timed out", "nginx_upstream_timeout", "warning", "An upstream timed out.", "Measure upstream latency and capacity before changing proxy timeout values."),
+        ("no space left on device", "nginx_no_space", "critical", "Nginx encountered a full filesystem or exhausted inodes.", "Inspect both capacity and inode usage on log, cache, temporary, and content filesystems."),
+        ("too many open files", "nginx_file_descriptors", "critical", "Nginx exhausted file descriptors.", "Compare worker_connections, process limits, active connections, and upstream usage."),
+        ("address already in use", "nginx_bind_collision", "critical", "Nginx could not bind a configured address.", "Identify the process already listening and check duplicate listen directives."),
+        ("cannot load certificate", "nginx_certificate_load", "critical", "Nginx could not load a TLS certificate or key.", "Check paths, syntax, file readability, key format, and certificate/key pairing."),
+    ]
+    for needle, code, severity, summary, recommendation in signatures:
+        if needle in error_text:
+            findings.append(_finding(code, severity, summary, evidence=needle, recommendation=recommendation))
+    statuses: Counter = Counter()
+    for line in access_lines:
+        match = re.search(r'"\s(\d{3})\s', line)
+        if match:
+            statuses[match.group(1)] += 1
+    total = sum(statuses.values())
+    if total:
+        errors_5xx = sum(count for status, count in statuses.items() if status.startswith("5"))
+        forbidden = statuses.get("403", 0)
+        missing = statuses.get("404", 0)
+        if errors_5xx:
+            findings.append(_finding(
+                "nginx_access_5xx", "warning", f"Recent access-log sample contains {errors_5xx}/{total} server errors.",
+                recommendation="Correlate timestamps and request IDs with the error log and upstream health.",
+            ))
+        if forbidden:
+            findings.append(_finding(
+                "nginx_access_403", "warning", f"Recent access-log sample contains {forbidden}/{total} HTTP 403 responses.",
+                recommendation="Check location policy, authentication, filesystem traversal, ACLs, SELinux, and AppArmor.",
+            ))
+        if missing:
+            findings.append(_finding(
+                "nginx_access_404", "info", f"Recent access-log sample contains {missing}/{total} HTTP 404 responses.",
+                recommendation="Confirm whether the paths are expected traffic, stale links, probes, or deployment omissions.",
+            ))
+    return findings
+
+
+def _http_status_probe(url: str, host_header: Optional[str], timeout: float) -> Dict[str, Any]:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Nginx probe URL must use http:// or https://")
+    headers = {"User-Agent": f"SysAdminToolbox/{__version__}"}
+    if host_header:
+        if len(host_header) > 255 or any(ord(char) < 33 for char in host_header):
+            raise ValueError("Invalid Host header")
+        headers["Host"] = host_header
+    request = urllib.request.Request(url, headers=headers, method="HEAD")
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return {
+                "status": "ok", "status_code": response.status,
+                "reason": response.reason, "final_url": _redact_url(response.geturl()),
+                "server": response.headers.get("Server"),
+                "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "status": "warning" if exc.code < 500 else "failed", "status_code": exc.code,
+            "reason": exc.reason, "final_url": _redact_url(exc.geturl()),
+            "server": exc.headers.get("Server") if exc.headers else None,
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {
+            "status": "failed", "error": str(exc),
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+
+
+def nginx_diagnostic(
+    service_name: str = "nginx",
+    binary: str = "nginx",
+    config: Optional[str] = None,
+    url: Optional[str] = None,
+    host_header: Optional[str] = None,
+    log_mode: str = "none",
+    lines: int = 50,
+    since: str = "1 hour ago",
+    raw_logs: bool = False,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    """Diagnose Nginx syntax, service, paths, listeners, logs, and an optional URL."""
+    if log_mode not in {"none", "system", "service", "error", "access", "all"}:
+        raise ValueError("Invalid log mode")
+    _validate_log_options(lines, since)
+    _validate_config_name(service_name.removesuffix(".service"), "service name", max_length=128)
+    executable = binary if os.path.sep in binary else shutil.which(binary)
+    findings = []
+    build: Dict[str, Any] = {}
+    syntax: Dict[str, Any] = {"tested": False}
+    parsed: Dict[str, Any] = {
+        "prefix": None, "config_files": [], "worker_user": None, "worker_group": None,
+        "paths": {"roots": [], "aliases": [], "error_logs": [], "access_logs": [], "certificates": []},
+        "listen_ports": [], "server_names": [], "upstreams": [],
+        "explicit_error_log": False, "explicit_access_log": False,
+    }
+    if not executable or not Path(executable).is_file():
+        findings.append(_finding(
+            "nginx_binary_missing", "critical", f"Nginx binary was not found: {binary}",
+            recommendation="Confirm the package installation or pass the binary path with --binary.",
+        ))
+    else:
+        version_command = _diagnostic_command([str(executable), "-V"], timeout=timeout)
+        build = _nginx_build_details(version_command["stdout"] + version_command["stderr"])
+        config_args = ["-c", config] if config else []
+        test_command = _diagnostic_command([str(executable), "-t"] + config_args, timeout=timeout)
+        test_text = "\n".join(
+            _redact_log_line(line) for line in (test_command["stdout"] + test_command["stderr"]).splitlines()
+        )
+        syntax = {
+            "tested": True, "ok": test_command["ok"], "returncode": test_command["returncode"],
+            "diagnostic": test_text[-16384:], "elapsed_ms": test_command["elapsed_ms"],
+        }
+        if not test_command["ok"]:
+            findings.append(_finding(
+                "nginx_config_invalid", "critical", "Nginx configuration validation failed.",
+                evidence=test_text[-4096:], recommendation="Resolve the reported syntax, include, path, or permission error before reloading Nginx.",
+            ))
+        dump_command = _diagnostic_command([str(executable), "-T"] + config_args, timeout=timeout)
+        if dump_command["stdout"]:
+            parsed = _parse_nginx_configuration(dump_command["stdout"], build)
+        elif not dump_command["ok"]:
+            findings.append(_finding(
+                "nginx_config_dump_unavailable", "warning", "Expanded Nginx configuration could not be inspected.",
+                evidence=_redact_log_line(dump_command.get("error") or "nginx -T failed"),
+                recommendation="Run the diagnostic with an account allowed to read every included configuration file.",
+            ))
+    include_service_logs = log_mode in {"system", "service", "all"}
+    service = service_diagnostic(
+        service_name, include_logs=include_service_logs, lines=lines, since=since,
+        raw_logs=raw_logs, timeout=timeout,
+    )
+    findings.extend(service["findings"])
+    build_args = build.get("configure_arguments", {})
+    if not parsed["paths"]["error_logs"] and not parsed.get("explicit_error_log"):
+        default_error = build_args.get("error-log-path") or "/var/log/nginx/error.log"
+        resolved = _nginx_resolve_path(str(default_error), str(parsed.get("prefix") or "/"))
+        if resolved:
+            parsed["paths"]["error_logs"].append(resolved)
+    if not parsed["paths"]["access_logs"] and not parsed.get("explicit_access_log"):
+        default_access = build_args.get("http-log-path") or "/var/log/nginx/access.log"
+        resolved = _nginx_resolve_path(str(default_access), str(parsed.get("prefix") or "/"))
+        if resolved:
+            parsed["paths"]["access_logs"].append(resolved)
+    log_files: Dict[str, List[Dict[str, Any]]] = {"error": [], "access": []}
+    error_lines: List[str] = []
+    access_lines: List[str] = []
+    for kind, paths in (("error", parsed["paths"]["error_logs"]), ("access", parsed["paths"]["access_logs"])):
+        include = log_mode in {kind, "all"}
+        for path in paths[:50]:
+            record = _tail_log_file(path, lines=lines, include_content=include, raw=raw_logs)
+            log_files[kind].append(record)
+            if include:
+                if kind == "error":
+                    error_lines.extend(record.get("lines", []))
+                else:
+                    access_lines.extend(record.get("lines", []))
+    findings.extend(_nginx_log_findings(error_lines, access_lines))
+    path_checks = []
+    relevant_paths = (
+        parsed["paths"]["roots"] + parsed["paths"]["aliases"] + parsed["paths"]["certificates"] +
+        parsed["paths"]["error_logs"] + parsed["paths"]["access_logs"]
+    )
+    worker_user = parsed.get("worker_user")
+    for path in (parsed["paths"]["roots"] + parsed["paths"]["aliases"])[:100]:
+        if not Path(path).exists():
+            findings.append(_finding(
+                "nginx_document_root_missing", "warning", f"Configured document root does not exist: {path}",
+                recommendation="Confirm the active virtual host, deployment path, and root/alias mapping.",
+            ))
+        check_path = path if Path(path).exists() else str(Path(path).parent)
+        check = _path_access_for_user(check_path, worker_user, parsed.get("worker_group"))
+        path_checks.append(check)
+        if check.get("traversable") is False:
+            findings.append(_finding(
+                "nginx_path_permission", "critical", f"Worker user '{worker_user}' cannot traverse a required path.",
+                evidence=str(check.get("blocker")),
+                recommendation="Review ownership, POSIX mode bits, ACLs, and security-module policy; do not recursively chmod content.",
+            ))
+    for path in parsed["paths"]["certificates"]:
+        if not Path(path).is_file():
+            findings.append(_finding(
+                "nginx_certificate_missing", "critical", f"Configured TLS file does not exist: {path}",
+                recommendation="Confirm the certificate/key deployment path and configuration include selected by nginx -T.",
+            ))
+    security = _security_frameworks(list(dict.fromkeys(relevant_paths)), timeout)
+    sockets = _listening_sockets(timeout)
+    listening_ports = {item.get("port") for item in sockets["listeners"]}
+    for port in parsed.get("listen_ports", []):
+        if sockets.get("available") and service.get("status") == "ok" and port not in listening_ports:
+            findings.append(_finding(
+                "nginx_listener_missing", "critical", f"Configured port {port} was not found in the listening-socket table.",
+                recommendation="Check bind addresses, namespace/container boundaries, socket activation, and startup logs.",
+            ))
+    http_probe = None
+    if url:
+        http_probe = _http_status_probe(url, host_header, timeout)
+        code = http_probe.get("status_code")
+        if http_probe["status"] == "failed":
+            findings.append(_finding(
+                "nginx_http_failed", "critical", "HTTP probe failed or returned a server error.",
+                evidence=str(http_probe.get("error") or code),
+                recommendation="Correlate the response with listener state, virtual-host selection, error logs, and upstream health.",
+            ))
+        elif code == 403:
+            findings.append(_finding(
+                "nginx_http_403", "warning", "HTTP probe returned 403 Forbidden.",
+                recommendation="Check access rules, authentication, root/alias traversal, ACLs, SELinux, and AppArmor.",
+            ))
+        elif code == 404:
+            findings.append(_finding(
+                "nginx_http_404", "warning", "HTTP probe returned 404 Not Found.",
+                recommendation="Check virtual-host selection, location precedence, root/alias mapping, and deployed files.",
+            ))
+    disk_paths = {"/"}
+    for path in relevant_paths:
+        candidate = Path(path)
+        if candidate.exists():
+            measured = candidate if candidate.is_dir() else candidate.parent
+            mount = _mount_details(measured)
+            disk_paths.add(str(mount["mountpoint"]) if mount else str(measured))
+    disks = [disk_diagnostic(path) for path in sorted(disk_paths)]
+    for disk in disks:
+        findings.extend(disk["findings"])
+    findings = _deduplicate_findings(findings)
+    return {
+        "status": _diagnostic_status(findings),
+        "read_only": True,
+        "binary": str(executable) if executable else binary,
+        "build": build,
+        "syntax": syntax,
+        "configuration": parsed,
+        "service": service,
+        "listening_sockets": sockets,
+        "path_access": path_checks,
+        "security_frameworks": security,
+        "filesystems": disks,
+        "logs": log_files,
+        "logs_included": log_mode != "none",
+        "logs_redacted": log_mode != "none" and not raw_logs,
+        "http_probe": http_probe,
+        "findings": findings,
+    }
+
+
 def reverse_dns_sweep(network: str, timeout: int = 2, max_threads: int = 50) -> List[Dict[str, Any]]:
     net = ipaddress.ip_network(network, strict=False)
     if net.num_addresses > MAX_NETWORK_HOSTS + 2:
@@ -3830,6 +5183,51 @@ def _setup_parser():
     p.add_argument("--interval", type=float, default=2.0, help="Polling interval for net wait")
     p.add_argument("--dkim-selector", help="Optional DKIM selector for dns-health")
 
+    # -- doctor --
+    p = sub.add_parser(
+        "doctor", aliases=["diag", "diagnose"], parents=[shared],
+        help="Read-only system, service, disk, network, and Nginx diagnostics",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  doctor system\n"
+            "  doctor system --logs system --since '30 minutes ago'\n"
+            "  doctor disk /var --du\n"
+            "  doctor service postgresql --logs service\n"
+            "  doctor network database.internal --port 5432\n"
+            "  doctor nginx --url http://127.0.0.1 --host-header example.com\n"
+            "  doctor nginx --logs all --lines 100\n\n"
+            "Diagnostics never change service state, ownership, permissions, or configuration.\n"
+            "Log content is opt-in, bounded, and redacted unless --raw-logs is explicit."
+        ),
+    )
+    p.add_argument(
+        "op", nargs="?", default="system",
+        choices=["system", "general", "nginx", "service", "disk", "network"],
+        help="Diagnostic to run (default: system)",
+    )
+    p.add_argument(
+        "target", nargs="?", default="",
+        help="Service name, filesystem path, or optional network endpoint",
+    )
+    p.add_argument("--url", help="HTTP/HTTPS URL to probe during an Nginx diagnostic")
+    p.add_argument("--host-header", help="Explicit Host header for the Nginx URL probe")
+    p.add_argument("--config", help="Explicit Nginx configuration file passed to nginx -t/-T")
+    p.add_argument("--binary", default="nginx", help="Nginx executable name or path")
+    p.add_argument(
+        "--logs", choices=["none", "system", "service", "error", "access", "all"],
+        default="none", help="Include selected logs (default: none)",
+    )
+    p.add_argument("--lines", type=int, default=50, help="Maximum log lines per source (1-500)")
+    p.add_argument("--since", default="1 hour ago", help="Journal time range understood by journalctl")
+    p.add_argument(
+        "--raw-logs", action="store_true",
+        help="Disable log redaction (may expose credentials or personal data)",
+    )
+    p.add_argument("--du", action="store_true", help="Collect top-level disk usage (may be slow)")
+    p.add_argument("--port", type=int, default=443, help="Default TCP port for doctor network")
+    p.add_argument("--timeout", type=float, default=10.0, help="Per-check timeout in seconds")
+
     # -- vendor --
     p = sub.add_parser("vendor", aliases=["v"], parents=[shared], help="Vendor config helpers",
                         formatter_class=argparse.RawTextHelpFormatter,
@@ -4450,6 +5848,49 @@ def _dispatch_net(args):
         output(ports, label="ports")
 
 
+def _dispatch_doctor(args):
+    if args.timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    _validate_log_options(args.lines, args.since)
+    operation = "system" if args.op == "general" else args.op
+    if operation == "system":
+        if args.logs not in {"none", "system", "service", "all"}:
+            raise ValueError("doctor system supports --logs none, system, service, or all")
+        result = system_diagnostic(
+            path=args.target or "/", include_du=args.du,
+            include_logs=args.logs != "none", lines=args.lines, since=args.since,
+            raw_logs=args.raw_logs, timeout=args.timeout,
+        )
+    elif operation == "disk":
+        if args.logs != "none" or args.raw_logs:
+            raise ValueError("doctor disk does not read logs")
+        result = disk_diagnostic(args.target or "/", include_du=args.du, timeout=args.timeout)
+    elif operation == "service":
+        if not args.target:
+            raise ValueError("Usage: doctor service NAME [--logs service]")
+        if args.logs not in {"none", "system", "service", "all"}:
+            raise ValueError("doctor service supports --logs none, system, service, or all")
+        result = service_diagnostic(
+            args.target, include_logs=args.logs != "none", lines=args.lines,
+            since=args.since, raw_logs=args.raw_logs, timeout=args.timeout,
+        )
+    elif operation == "network":
+        if args.logs != "none" or args.raw_logs:
+            raise ValueError("doctor network does not read logs")
+        result = network_diagnostic(args.target or None, port=args.port, timeout=args.timeout)
+    elif operation == "nginx":
+        result = nginx_diagnostic(
+            service_name=args.target or "nginx", binary=args.binary,
+            config=args.config, url=args.url, host_header=args.host_header,
+            log_mode=args.logs, lines=args.lines, since=args.since,
+            raw_logs=args.raw_logs, timeout=args.timeout,
+        )
+    else:
+        raise ValueError(f"Unsupported diagnostic: {operation}")
+    output(result, label=f"{operation}_diagnostic")
+    return 1 if result.get("status") in {"warning", "failed"} else 0
+
+
 def _dispatch_vendor(args):
     op = args.op
     a = args.args
@@ -4514,6 +5955,7 @@ DISPATCH = {
     "ipv6": _dispatch_ipv6, "v6": _dispatch_ipv6,
     "mac": _dispatch_mac, "m": _dispatch_mac,
     "net": _dispatch_net, "n": _dispatch_net,
+    "doctor": _dispatch_doctor, "diag": _dispatch_doctor, "diagnose": _dispatch_doctor,
     "vendor": _dispatch_vendor, "v": _dispatch_vendor,
     "cheat": _dispatch_cheat, "cs": _dispatch_cheat,
 }
@@ -4549,6 +5991,7 @@ def _repl():
             print(f"  {c.YELLOW}ipv6{c.RESET}    (v6)  expand, compress, tobin, type, subnet")
             print(f"  {c.YELLOW}mac{c.RESET}     (m)   info, format, normalize, vendor")
             print(f"  {c.YELLOW}net{c.RESET}     (n)   ping, portscan, traceroute, whois, dns, rdns")
+            print(f"  {c.YELLOW}doctor{c.RESET}  (diag) system, nginx, service, disk, network")
             print(f"  {c.YELLOW}vendor{c.RESET}  (v)   vlan, acl")
             print(f"  {c.YELLOW}cheat{c.RESET}   (cs)  vlan, acl, huawei, mikrotik, firewall, routing, nat")
             print(f"\n  {c.DIM}Flags: --json, --no-color{c.RESET}")

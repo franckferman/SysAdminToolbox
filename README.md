@@ -16,7 +16,7 @@ SysAdminToolbox provides network calculations, operational checks, and configura
 
 - **Conversions** - Binary, decimal, hexadecimal, IPv4, masks, CIDR, wildcards, and IANA address classification.
 - **Address planning** - IPv4/IPv6 subnetting, VLSM, ranges, containment, exclusion, indexed addresses, overlap checks, supernets, and inventory audits.
-- **Diagnostics** - Service readiness, DNS health, TCP/UDP checks, traceroute, WHOIS, TLS certificate audits, HTTP headers, and local network state.
+- **Diagnostics** - Read-only host, filesystem, inode, service, Nginx, listener, DNS, TCP/UDP, TLS, HTTP, and local network checks.
 - **Batch operations** - Files or standard input, bounded concurrency, per-target results, and text, JSON, NDJSON, or CSV output.
 - **MAC utilities** - Normalization, generation, address properties, and optional vendor lookup from a locally cached IEEE OUI registry.
 - **Configuration** - Platform-aware VLAN and ACL generators for Cisco, Juniper, and Huawei.
@@ -59,6 +59,9 @@ The calculations use only Python. Some diagnostics use operating-system commands
 | WHOIS | `whois` |
 | Advanced DNS, DNSSEC, and delegation checks | `dig`, with a limited `nslookup` fallback |
 | Local network snapshot | `ip`, `ifconfig`, `route`, or `ipconfig` |
+| System and service diagnostics | `systemctl`, `journalctl`, `rc-service`, `service`, `launchctl`, `sc`, `timedatectl`, `chronyc`, `ntpq`, or `w32tm` |
+| Listener and disk analysis | `ss` or `netstat`, plus optional `du` |
+| Nginx diagnostics | `nginx`, plus optional `getenforce` and security-context output from `ls` |
 
 ## Usage
 
@@ -69,6 +72,8 @@ SysAdminToolbox <command> <operation> [arguments] [options]
 ```bash
 SysAdminToolbox convert ipclass 100.64.0.1
 SysAdminToolbox subnet calc 192.168.1.42/24
+SysAdminToolbox doctor system
+SysAdminToolbox doctor nginx --url http://127.0.0.1 --host-header example.com
 SysAdminToolbox net doctor https://example.com
 SysAdminToolbox net wait database.internal 5432 --timeout 60
 SysAdminToolbox vendor profiles
@@ -86,6 +91,7 @@ Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the compl
 | `ipv6` (`v6`) | `expand`, `compress`, `tobin`, `type`, `subnet`, `ula` |
 | `mac` (`m`) | `info`, `format`, `normalize`, `vendor`, `generate`, `oui-update` |
 | `net` (`n`) | `doctor`, `wait`, `cert-audit`, `dns-health`, `local`, plus focused network checks |
+| `doctor` (`diag`, `diagnose`) | `system`, `nginx`, `service`, `disk`, `network` |
 | `vendor` (`v`) | `profiles`, `vlan`, `acl` |
 | `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
 
@@ -131,6 +137,52 @@ SysAdminToolbox subnet audit allocations.csv 10.20.0.0/16
 The audit exits with status 1 when it finds an issue, which makes it suitable for validation jobs.
 
 ## Operational diagnostics
+
+### Host and application diagnostics
+
+The top-level `doctor` command explains likely causes without changing the host. It never starts or reloads a service, edits configuration, changes ownership or permissions, deletes data, or remounts a filesystem.
+
+```bash
+# Overall host state: CPU/load, memory, pressure stalls, disk capacity,
+# inodes, mounts, failed services, routing, DNS, and listeners
+SysAdminToolbox doctor system
+
+# Add a bounded top-level disk-usage scan
+SysAdminToolbox doctor system /var --du
+
+# Capacity, inode exhaustion, read-only mounts, and largest entries
+SysAdminToolbox doctor disk /var --du
+
+# Generic service state and exit information
+SysAdminToolbox doctor service postgresql
+
+# Local network state plus an explicit DNS/TCP probe
+SysAdminToolbox doctor network database.internal --port 5432
+```
+
+`doctor nginx` correlates the Nginx binary and build paths, `nginx -t` syntax validation, the expanded active configuration from `nginx -T`, service state, configured listeners, document roots, certificate paths, worker traversal permissions, filesystem capacity and inodes, SELinux/AppArmor signals, and an optional HTTP HEAD virtual-host probe.
+
+```bash
+SysAdminToolbox doctor nginx
+SysAdminToolbox doctor nginx --config /etc/nginx/nginx.conf
+SysAdminToolbox doctor nginx \
+  --url http://127.0.0.1/health \
+  --host-header app.example.com
+```
+
+Its findings distinguish common failure classes such as invalid includes, missing roots or certificates, 403 policy and path traversal errors, 404 virtual-host or deployment mismatches, unavailable upstreams, bind collisions, timeouts, full filesystems, inode exhaustion, file-descriptor exhaustion, and TLS file-loading errors. The expanded configuration is parsed in memory and is not printed, because it may contain credentials.
+
+Log contents are never read by default. Select them explicitly and keep the sample narrow:
+
+```bash
+# Service journal only
+SysAdminToolbox doctor service nginx --logs service --lines 50 --since "30 minutes ago"
+
+# Nginx error and access logs plus the service journal
+SysAdminToolbox doctor nginx --logs all --lines 100
+```
+
+Selected logs are capped at 500 lines per source and redact authorization headers, cookies, common secret parameters, and JWT-shaped values. Automatic service-journal collection uses `journalctl`; other service managers report that the application-specific log path must be selected manually. `--raw-logs` disables redaction and should be used only when the output remains in an approved location. Some checks need elevated read access, but the tool does not require or invoke `sudo` itself. Nginx validation opens referenced files, and an optional HTTP probe normally creates a regular access-log entry.
 
 ### Doctor and batch input
 
@@ -272,7 +324,7 @@ Exit status conventions:
 
 ## Tests
 
-The standard-library test suite covers calculations, validation, batch formats and ordering, IPAM audits, OUI handling, platform profiles, CLI behavior, mocked external integrations, and loopback-only network checks.
+The standard-library test suite covers calculations, validation, batch formats and ordering, IPAM audits, OUI handling, platform profiles, CLI behavior, diagnostic correlation and redaction, mocked external integrations, and loopback-only network checks.
 
 ```bash
 python3 -m compileall -q src tests
