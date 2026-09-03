@@ -40,6 +40,8 @@ jobs:
         run: python -c "import json, subprocess; data = json.loads(subprocess.check_output(['SysAdminToolbox', '--json', 'subnet', 'calc', '10.0.0.0/8'], text=True)); assert data['network_address'] == '10.0.0.0'"
       - name: Verify installed system diagnostic
         run: python -c "import json, subprocess; result = subprocess.run(['SysAdminToolbox', '--json', 'doctor', 'disk', '.'], text=True, capture_output=True); assert result.returncode in (0, 1), result.stderr; data = json.loads(result.stdout); assert data['path'] == '.' and data['status'] in ('ok', 'warning', 'failed')"
+      - name: Verify installed firewall diagnostic
+        run: python -c "import json, subprocess; result = subprocess.run(['SysAdminToolbox', '--json', 'doctor', 'firewall', '80,443', '--timeout', '2'], text=True, capture_output=True); assert result.returncode in (0, 1), result.stderr; data = json.loads(result.stdout); assert data['ports'] == [80, 443] and data['read_only'] is True"
       - name: Check package dependencies
         run: python -m pip check
       - name: Compile sources and tests
