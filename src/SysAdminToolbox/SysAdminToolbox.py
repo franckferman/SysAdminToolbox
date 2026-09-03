@@ -16,6 +16,7 @@ License details:
 """
 
 import argparse
+import hashlib
 import ipaddress
 import itertools
 import json
@@ -2448,6 +2449,15 @@ def _setup_parser():
     p.add_argument("sheet", choices=["vlan","acl","huawei","mikrotik","firewall","routing","nat"], help="Cheatsheet topic")
     p.add_argument("section", nargs='?', default=None, help="Specific section (optional)")
 
+    # -- ai --
+    p = sub.add_parser("ai", parents=[shared], help="AI assistant (optional, opt-in)",
+                        formatter_class=argparse.RawTextHelpFormatter,
+                        epilog="Examples:\n  ai ask \"what is a /29 useful for\"\n  ai suggest \"split 10.0.0.0/24 into 4 subnets\"\n  SysAdminToolbox net certcheck example.com --json | SysAdminToolbox ai explain\n\nProviders (--provider): auto (default) | ollama | anthropic | openai | deepseek | kimi, optionally provider:model.\nKeys via env: ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / MOONSHOT_API_KEY. Local Ollama: OLLAMA_HOST.\nPrivacy: local ollama is preferred when reachable; cloud sends require a confirmation or --yes.")
+    p.add_argument("op", choices=["ask", "explain", "suggest"], help="AI operation")
+    p.add_argument("text", nargs="*", help="Question or request (explain also reads piped stdin)")
+    p.add_argument("--provider", default="auto", help="auto|ollama|anthropic|openai|deepseek|kimi (or provider:model)")
+    p.add_argument("--yes", "-y", action="store_true", help="Skip the cloud-send confirmation")
+
     return parser
 
 
@@ -2970,6 +2980,190 @@ def _dispatch_cheat(args):
     output(fn(args.section), label="cheatsheet")
 
 
+# ---------------------------------------------------------------------------
+#  AI assistant (optional, opt-in) - standard library only (urllib).
+#  No network call happens unless the `ai` command is used, so the tool stays
+#  dependency-free and fully offline by default.
+# ---------------------------------------------------------------------------
+
+_AI_SYSTEM = (
+    "You are a concise network engineering assistant inside a CLI named "
+    "SysAdminToolbox. Answer accurately and briefly for a professional sysadmin. "
+    "When a SysAdminToolbox command would help, name it (groups: convert, subnet, "
+    "ipv6, mac, net, vendor, cheat)."
+)
+
+# provider -> (env var with the API key, default model, base url; None base url = anthropic)
+_AI_CLOUD = {
+    "anthropic": ("ANTHROPIC_API_KEY", "claude-haiku-4-5-20251001", None),
+    "openai":    ("OPENAI_API_KEY",    "gpt-4o-mini",              "https://api.openai.com/v1"),
+    "deepseek":  ("DEEPSEEK_API_KEY",  "deepseek-chat",            "https://api.deepseek.com/v1"),
+    "kimi":      ("MOONSHOT_API_KEY",  "moonshot-v1-8k",           "https://api.moonshot.cn/v1"),
+}
+_AI_OLLAMA_DEFAULT = "llama3.2"
+
+
+def _ai_timeout() -> int:
+    try:
+        return int(os.environ.get("LLM_TIMEOUT", "60"))
+    except ValueError:
+        return 60
+
+
+def _ai_prompt_digest(prompt: str) -> str:
+    """Short hash of the prompt for transparency/logging - never the prompt itself."""
+    return "sha256:" + hashlib.sha256((prompt or "").encode("utf-8", "ignore")).hexdigest()[:12]
+
+
+def _ai_ollama_host() -> str:
+    return os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+
+
+def _ai_ollama_reachable() -> bool:
+    try:
+        req = urllib.request.Request(_ai_ollama_host() + "/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def _ai_resolve_provider(spec: str):
+    """Resolve a provider spec to (provider, model).
+
+    'auto' (default) picks a reachable local Ollama, else the first cloud provider
+    whose API key is set. Otherwise 'provider' or 'provider:model'.
+    """
+    spec = (spec or "auto").strip().lower()
+    if spec in ("", "auto"):
+        if _ai_ollama_reachable():
+            return ("ollama", _AI_OLLAMA_DEFAULT)
+        for name, (env, default, _url) in _AI_CLOUD.items():
+            if os.environ.get(env):
+                return (name, default)
+        return ("ollama", _AI_OLLAMA_DEFAULT)
+    provider, _, model = spec.partition(":")
+    if provider == "ollama":
+        return ("ollama", model or _AI_OLLAMA_DEFAULT)
+    if provider in _AI_CLOUD:
+        return (provider, model or _AI_CLOUD[provider][1])
+    raise ValueError(
+        "Unknown AI provider '%s' (use auto|ollama|anthropic|openai|deepseek|kimi)" % provider)
+
+
+def _ai_call_ollama(prompt: str, model: str) -> str:
+    payload = json.dumps({
+        "model": model, "system": _AI_SYSTEM, "prompt": prompt,
+        "stream": False, "options": {"temperature": 0.3},
+    }).encode()
+    req = urllib.request.Request(
+        _ai_ollama_host() + "/api/generate", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read()).get("response", "")
+
+
+def _ai_call_openai_compat(prompt: str, model: str, api_key: str, base_url: str) -> str:
+    if not api_key:
+        raise RuntimeError("Missing API key for this provider (set the matching *_API_KEY env var).")
+    payload = json.dumps({
+        "model": model, "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": _AI_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode()
+    req = urllib.request.Request(
+        base_url.rstrip("/") + "/chat/completions", data=payload,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + api_key},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read())["choices"][0]["message"]["content"]
+
+
+def _ai_call_anthropic(prompt: str, model: str, api_key: str) -> str:
+    if not api_key:
+        raise RuntimeError("Missing ANTHROPIC_API_KEY.")
+    payload = json.dumps({
+        "model": model, "max_tokens": 1024, "system": _AI_SYSTEM,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read())["content"][0]["text"]
+
+
+def ai_complete(prompt: str, spec: str = "auto") -> str:
+    """Run one completion and return the model's text. Raises RuntimeError on failure."""
+    provider, model = _ai_resolve_provider(spec)
+    try:
+        if provider == "ollama":
+            return _ai_call_ollama(prompt, model)
+        if provider == "anthropic":
+            return _ai_call_anthropic(prompt, model, os.environ.get("ANTHROPIC_API_KEY", ""))
+        env, _default, base_url = _AI_CLOUD[provider]
+        return _ai_call_openai_compat(prompt, model, os.environ.get(env, ""), base_url)
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("AI request failed (%s): %s" % (provider, exc))
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Unexpected AI response (%s): %s" % (provider, exc))
+
+
+def _ai_build_prompt(op: str, text: str) -> str:
+    if op == "explain":
+        return ("Explain the following network diagnostic or CLI output for a sysadmin, "
+                "concisely and in plain language:\n\n" + text)
+    if op == "suggest":
+        return ("Give the single best SysAdminToolbox command line for this request. "
+                "Output only the command, no prose.\nRequest: " + text)
+    return text  # ask
+
+
+def _dispatch_ai(args):
+    if args.op == "explain" and not sys.stdin.isatty():
+        text = sys.stdin.read().strip()
+    else:
+        text = " ".join(args.text).strip()
+    if not text:
+        extra = " (or pipe output into 'ai explain')" if args.op == "explain" else ""
+        raise ValueError("Nothing to send. Usage: ai %s \"<text>\"%s" % (args.op, extra))
+
+    prompt = _ai_build_prompt(args.op, text)
+    provider, model = _ai_resolve_provider(args.provider)
+
+    if provider != "ollama" and not args.yes:
+        digest = _ai_prompt_digest(prompt)
+        print("[ai] This sends your prompt to cloud provider '%s' (model %s). Digest %s"
+              % (provider, model, digest), file=sys.stderr)
+        if sys.stdin.isatty():
+            try:
+                if input("[ai] Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+                    print("[ai] Aborted.", file=sys.stderr)
+                    return
+            except (EOFError, KeyboardInterrupt):
+                print("[ai] Aborted.", file=sys.stderr)
+                return
+        else:
+            raise RuntimeError(
+                "Refusing to send to cloud provider '%s' non-interactively; pass --yes to confirm, "
+                "or run a local ollama (private)." % provider)
+
+    answer = ai_complete(prompt, args.provider)
+    if is_json_mode():
+        output({"provider": provider, "model": model,
+                "prompt_digest": _ai_prompt_digest(prompt), "answer": answer}, label="ai")
+    else:
+        print(answer.strip())
+
+
+
 DISPATCH = {
     "convert": _dispatch_convert, "conv": _dispatch_convert, "c": _dispatch_convert,
     "subnet": _dispatch_subnet, "sub": _dispatch_subnet, "s": _dispatch_subnet,
@@ -2978,6 +3172,7 @@ DISPATCH = {
     "net": _dispatch_net, "n": _dispatch_net,
     "vendor": _dispatch_vendor, "v": _dispatch_vendor,
     "cheat": _dispatch_cheat, "cs": _dispatch_cheat,
+    "ai": _dispatch_ai,
 }
 
 
