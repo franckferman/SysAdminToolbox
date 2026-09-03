@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
-from SysAdminToolbox import SysAdminToolbox as sat  # noqa: E402
+from SysAdminToolbox import SysAdminToolbox as sat  # type: ignore[attr-defined]  # noqa: E402
 
 
 class ConversionTests(unittest.TestCase):
@@ -901,6 +901,219 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(result["dns_servers"], ["192.0.2.53"])
 
 
+class DiagnosticTests(unittest.TestCase):
+    def test_log_redaction_covers_headers_queries_and_jwts(self):
+        line = (
+            'GET /?token=secret&name=test HTTP/1.1 Authorization: Bearer abc '
+            'Cookie: session=secret eyJabcdefghijk.abcdefghijk.abcdefghijk '
+            '--password cli-secret'
+        )
+        redacted = sat._redact_log_line(line)
+        self.assertNotIn("secret", redacted)
+        self.assertNotIn("Bearer abc", redacted)
+        self.assertNotIn("cli-secret", redacted)
+        self.assertNotIn("eyJabcdefghijk", redacted)
+        self.assertIn("[REDACTED]", redacted)
+
+    def test_log_tail_is_opt_in_bounded_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "access.log"
+            path.write_text(
+                'first\nGET /?api_key=topsecret HTTP/1.1\nlast\n', encoding="utf-8"
+            )
+            metadata = sat._tail_log_file(str(path), lines=2)
+            content = sat._tail_log_file(str(path), lines=2, include_content=True)
+        self.assertNotIn("lines", metadata)
+        self.assertEqual(len(content["lines"]), 2)
+        self.assertNotIn("topsecret", "\n".join(content["lines"]))
+        with self.assertRaises(ValueError):
+            sat._validate_log_options(501, "1 hour ago")
+
+    @patch.object(sat, "_mount_details", return_value={"mountpoint": "/", "read_only": False})
+    @patch.object(sat.os, "statvfs", create=True)
+    @patch.object(sat.shutil, "disk_usage")
+    def test_disk_diagnostic_detects_capacity_and_inode_pressure(self, disk_usage, statvfs, _mount):
+        disk_usage.return_value = SimpleNamespace(total=1000, used=960, free=40)
+        statvfs.return_value = SimpleNamespace(f_files=100, f_ffree=2)
+        with tempfile.TemporaryDirectory() as directory:
+            result = sat.disk_diagnostic(directory)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(
+            {item["code"] for item in result["findings"]},
+            {"disk_critical", "inode_critical"},
+        )
+
+    @patch.object(sat, "_process_matches", return_value=[{"pid": 12, "command": "nginx"}])
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat, "_service_manager", return_value="systemd")
+    def test_service_diagnostic_reads_selected_properties_and_redacts_journal(self, _manager, command, _processes):
+        def response(argv, **_kwargs):
+            if argv[0] == "systemctl":
+                return {
+                    "available": True, "ok": True, "returncode": 0,
+                    "stdout": "LoadState=loaded\nActiveState=active\nSubState=running\nExecMainStatus=0\n",
+                    "stderr": "", "error": None, "elapsed_ms": 1,
+                }
+            return {
+                "available": True, "ok": True, "returncode": 0,
+                "stdout": "service token=secret\n", "stderr": "", "error": None,
+                "elapsed_ms": 1,
+            }
+        command.side_effect = response
+        result = sat.service_diagnostic("nginx", include_logs=True)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["details"]["ActiveState"], "active")
+        self.assertNotIn("secret", result["journal"][0])
+        self.assertTrue(result["logs_redacted"])
+
+    @patch.object(sat, "tcp_probe", return_value={"status": "failed", "error": "refused"})
+    @patch.object(sat, "resolve_all", return_value={"status": "ok", "addresses": [{"address": "192.0.2.1"}]})
+    @patch.object(sat, "_listening_sockets", return_value={"available": True, "listeners": []})
+    @patch.object(sat, "local_network_inventory")
+    def test_network_diagnostic_correlates_local_state_and_probe(self, inventory, _listeners, _resolve, _tcp):
+        inventory.return_value = {
+            "interfaces": [], "default_routes": [], "dns_servers": [], "errors": [],
+        }
+        result = sat.network_diagnostic("example.com", port=443)
+        codes = {item["code"] for item in result["findings"]}
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("default_route_missing", codes)
+        self.assertIn("dns_servers_missing", codes)
+        self.assertIn("probe_tcp_failed", codes)
+
+    def test_nginx_configuration_parser_extracts_only_diagnostic_metadata(self):
+        configuration = """# configuration file /etc/nginx/nginx.conf:
+user www-data www-data;
+error_log /var/log/nginx/error.log warn;
+http {
+  access_log /var/log/nginx/access.log main;
+  server {
+    listen 443 ssl;
+    server_name example.com www.example.com;
+    root /srv/www/example;
+    ssl_certificate /etc/ssl/example.pem;
+    ssl_certificate_key /etc/ssl/example.key;
+    proxy_pass http://app_backend;
+    location /media/ {
+      alias
+        /srv/media/;
+    }
+  }
+}
+"""
+        result = sat._parse_nginx_configuration(
+            configuration, {"configure_arguments": {"prefix": "/etc/nginx"}}
+        )
+        self.assertEqual(result["worker_user"], "www-data")
+        self.assertEqual(result["listen_ports"], [443])
+        self.assertEqual(result["paths"]["roots"], ["/srv/www/example"])
+        self.assertIn("/etc/ssl/example.key", result["paths"]["certificates"])
+        self.assertEqual(result["paths"]["aliases"], ["/srv/media"])
+        self.assertEqual(result["server_names"], ["example.com www.example.com"])
+        self.assertNotIn("ssl_certificate_key", result)
+
+    def test_nginx_endpoint_and_url_redaction_remove_credentials(self):
+        self.assertEqual(
+            sat._redact_nginx_endpoint("http://admin:secret@backend/?token=value"),
+            "http://[REDACTED]@backend/?token=[REDACTED]",
+        )
+        self.assertEqual(
+            sat._redact_url("https://admin:secret@example.com/path?api_key=value"),
+            "https://[REDACTED]@example.com/path?api_key=[REDACTED]",
+        )
+
+    @patch.object(sat, "_process_matches", return_value=[])
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat, "_service_manager", return_value="systemd")
+    def test_service_diagnostic_reports_service_manager_query_failure(self, _manager, command, _processes):
+        command.return_value = {
+            "available": True, "ok": False, "returncode": 1, "stdout": "", "stderr": "offline",
+            "error": "offline", "elapsed_ms": 1,
+        }
+        result = sat.service_diagnostic("nginx")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["findings"][0]["code"], "service_query_failed")
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which")
+    def test_time_sync_uses_chrony_when_systemd_tool_is_absent(self, which, command):
+        which.side_effect = lambda name: "/usr/bin/chronyc" if name == "chronyc" else None
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": "Reference ID : 192.0.2.1\nLeap status : Normal\n",
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        result = sat._time_sync_status(1)
+        self.assertEqual(result["source"], "chronyc")
+        self.assertTrue(result["synchronized"])
+
+    def test_nginx_log_analysis_distinguishes_causes_and_statuses(self):
+        findings = sat._nginx_log_findings(
+            ["connect() failed (111: Connection refused)", "open() failed (13: Permission denied)"],
+            ['"GET /missing HTTP/1.1" 404 1', '"GET /private HTTP/1.1" 403 1'],
+        )
+        codes = {item["code"] for item in findings}
+        self.assertTrue({"nginx_upstream_connect", "nginx_permission_denied", "nginx_access_403", "nginx_access_404"} <= codes)
+
+    @patch.object(sat, "disk_diagnostic", return_value={"status": "ok", "findings": []})
+    @patch.object(sat, "_security_frameworks", return_value={"selinux": "Disabled", "apparmor": None, "path_contexts": []})
+    @patch.object(sat, "_path_access_for_user", return_value={"traversable": True})
+    @patch.object(sat, "_tail_log_file")
+    @patch.object(sat, "_listening_sockets")
+    @patch.object(sat, "service_diagnostic")
+    @patch.object(sat, "_diagnostic_command")
+    def test_nginx_diagnostic_correlates_syntax_service_config_and_logs(
+        self, command, service, sockets, tail, _path_access, _security, _disk,
+    ):
+        configuration = """# configuration file /etc/nginx/nginx.conf:
+user www-data;
+error_log /var/log/nginx/error.log;
+access_log /var/log/nginx/access.log main;
+listen 8080;
+root /srv/www;
+"""
+        def response(argv, **_kwargs):
+            if "-V" in argv:
+                stdout, stderr = "", "nginx version: nginx/1.26.2\nconfigure arguments: --prefix=/etc/nginx"
+            elif "-T" in argv:
+                stdout, stderr = configuration, "configuration test is successful"
+            else:
+                stdout, stderr = "", "configuration test is successful"
+            return {
+                "available": True, "ok": True, "returncode": 0, "stdout": stdout,
+                "stderr": stderr, "error": None, "elapsed_ms": 1,
+            }
+        command.side_effect = response
+        service.return_value = {"status": "ok", "findings": [], "journal": []}
+        sockets.return_value = {
+            "available": True, "listeners": [{"port": 8080, "protocol": "tcp", "local_address": "*:8080"}],
+        }
+        tail.side_effect = lambda path, **kwargs: {
+            "path": path, "exists": True,
+            "lines": ['"GET / HTTP/1.1" 200 12'] if kwargs.get("include_content") else [],
+        }
+        with tempfile.NamedTemporaryFile() as executable:
+            result = sat.nginx_diagnostic(binary=executable.name, log_mode="access")
+        self.assertEqual(result["status"], "warning")
+        self.assertIn("nginx_document_root_missing", {item["code"] for item in result["findings"]})
+        self.assertTrue(result["syntax"]["ok"])
+        self.assertEqual(result["configuration"]["listen_ports"], [8080])
+        self.assertEqual(result["build"]["version"], "1.26.2")
+        self.assertTrue(result["logs_redacted"])
+
+    @patch.object(sat, "network_diagnostic", return_value={"status": "ok", "findings": []})
+    @patch.object(sat, "disk_diagnostic", return_value={"status": "ok", "findings": []})
+    @patch.object(sat, "_linux_pressure", return_value={})
+    @patch.object(sat, "_proc_memory", return_value={"available_percent": 4.0, "swap_used_percent": 0})
+    @patch.object(sat, "_service_manager", return_value="unknown")
+    @patch.object(sat.os, "getloadavg", return_value=(0.1, 0.1, 0.1), create=True)
+    def test_system_diagnostic_reports_resource_pressure(self, _load, _manager, _memory, _pressure, _disk, _network):
+        result = sat.system_diagnostic(path="/", timeout=1)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("memory_critical", {item["code"] for item in result["findings"]})
+        self.assertFalse(result["logs_included"])
+
+
 class OutputAndCliTests(unittest.TestCase):
     CLI = [sys.executable, str(SRC / "SysAdminToolbox" / "SysAdminToolbox.py")]
 
@@ -921,7 +1134,7 @@ class OutputAndCliTests(unittest.TestCase):
     def test_version_and_help(self):
         self.assertIn(sat.__version__, self.run_cli("--version").stdout)
         self.assertIn("Network administration", self.run_cli("--help").stdout)
-        for command in ("convert", "subnet", "ipv6", "mac", "net", "vendor", "cheat"):
+        for command in ("convert", "subnet", "ipv6", "mac", "net", "doctor", "vendor", "cheat"):
             with self.subTest(command=command):
                 self.assertEqual(self.run_cli(command, "--help").returncode, 0)
 
@@ -1022,6 +1235,15 @@ class OutputAndCliTests(unittest.TestCase):
         for command in commands:
             with self.subTest(command=" ".join(command)):
                 self.assert_json_command(*command)
+
+    def test_doctor_disk_cli_and_alias_emit_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            direct = self.run_cli("doctor", "disk", directory, "--json")
+            alias = self.run_cli("diag", "disk", directory, "--json")
+        self.assertIn(direct.returncode, {0, 1}, direct.stderr)
+        self.assertIn(alias.returncode, {0, 1}, alias.stderr)
+        self.assertEqual(json.loads(direct.stdout)["path"], directory)
+        self.assertEqual(json.loads(alias.stdout)["path"], directory)
 
     def test_legacy_cheatsheet_flag(self):
         current = self.run_cli("cs", "vlan")
