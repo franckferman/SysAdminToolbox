@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 4.2.0
+Version  : 4.3.0
 License  : MIT
 
 Repository:
@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "4.2.0"
+__version__ = "4.3.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -3480,6 +3480,7 @@ def service_diagnostic(
     symptom: Optional[str] = None,
     expected: Optional[str] = None,
     recent_change: Optional[str] = None,
+    port: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Inspect a service without starting, stopping, or reloading it."""
     _validate_config_name(name.removesuffix(".service"), "service name", max_length=128)
@@ -3648,6 +3649,9 @@ def service_diagnostic(
         ))
         manager_status = "warning"
         manager_summary = f"The manager state conflicts with {len(processes)} running process(es)."
+    firewall = firewall_diagnostic([port], timeout=timeout) if port is not None else None
+    if firewall:
+        findings.extend(firewall["findings"])
     findings = _deduplicate_findings(findings)
     manager_phase_findings = [item for item in findings if item.get("phase") == "service_manager"]
     log_findings = [item for item in findings if item.get("phase") == "logs"]
@@ -3677,6 +3681,15 @@ def service_diagnostic(
             depends_on=["service_manager"],
         ),
         _diagnostic_step(
+            "firewall", "Correlate the service port with host firewall policy",
+            "failed" if firewall and firewall.get("status") == "failed" else
+            "warning" if firewall and firewall.get("status") == "warning" else
+            "passed" if firewall else "skipped",
+            f"Inspected inbound TCP port {port}." if firewall else
+            "Supply --port to correlate this service with the host firewall.",
+            layer="OSI 3-4", depends_on=["process"],
+        ),
+        _diagnostic_step(
             "logs", "Inspect time-bounded service logs",
             "warning" if any(item.get("severity") in {"critical", "warning"} for item in log_findings) else
             "passed" if include_logs and manager == "systemd" else "skipped" if not include_logs else "not_applicable",
@@ -3694,10 +3707,11 @@ def service_diagnostic(
         "read_only": True,
         "context": context,
         "methodology": _methodology(
-            "service-state", "Define the symptom, query the manager, correlate processes, then inspect bounded logs before changing state.", steps,
+            "service-state", "Define the symptom, query the manager, correlate processes and any explicit service port, then inspect bounded logs before changing state.", steps,
         ),
         "details": details,
         "processes": processes,
+        "firewall": firewall,
         "journal": journal,
         "logs_requested": include_logs,
         "logs_collected": bool(journal),
@@ -3909,6 +3923,578 @@ def _listening_sockets(timeout: float = 5.0) -> Dict[str, Any]:
         "listeners": listeners,
         "truncated": len(listeners) >= 1000,
         "error": command.get("error") if not command["ok"] else None,
+    }
+
+
+def _firewall_permission_limited(command: Dict[str, Any]) -> bool:
+    text = "\n".join(
+        str(command.get(key) or "") for key in ("stdout", "stderr", "error")
+    ).lower()
+    return any(marker in text for marker in (
+        "permission denied", "operation not permitted", "must be root",
+        "need to be root", "you need to be root", "access is denied",
+        "requires elevation", "insufficient privileges",
+    ))
+
+
+def _port_in_numeric_spec(port: int, value: str) -> bool:
+    """Match a port against numeric single, range, or comma-separated syntax."""
+    for start_text, end_text in re.findall(r"(?<![\d.])(\d{1,5})(?:\s*[-:]\s*(\d{1,5}))?", value):
+        start = int(start_text)
+        end = int(end_text) if end_text else start
+        if 1 <= start <= port <= end <= 65535:
+            return True
+    return False
+
+
+def _firewall_rule_mentions_port(line: str, port: int) -> bool:
+    lowered = line.lower()
+    has_port_selector = "dport" in lowered or bool(re.search(r"\bport\b", lowered))
+    if not has_port_selector:
+        # A terminal inbound deny without a port selector can affect every new
+        # connection. Do not treat stateful ESTABLISHED/RELATED accepts or
+        # outbound PF rules as evidence about a new inbound connection.
+        if re.search(r"\b(?:established|related)\b", lowered):
+            return False
+        if re.search(r"\bout\b", lowered) and not re.search(r"\bin\b", lowered):
+            return False
+        return bool(re.search(r"\b(?:block|drop|deny|reject)\b", lowered))
+    if re.search(r"(?:--dports?|\bdport|\bport\s*(?:=)?)\s+[\"']?(?:any\b|\*)", lowered):
+        return True
+    if "--dport" in lowered:
+        match = re.search(r"--dports?\s+([^\s]+)", lowered)
+        return bool(match and _port_in_numeric_spec(port, match.group(1)))
+    match = re.search(
+        r"\bdport\s+(.*?)(?:\s+(?:accept|allow|drop|deny|reject|counter|jump|goto|comment)\b|$)",
+        lowered,
+    )
+    if match:
+        return _port_in_numeric_spec(port, match.group(1))
+    match = re.search(
+        r"\bport\s*(?:=)?\s*(.*?)(?:\s+(?:accept|allow|drop|deny|reject|in|on|from|to|$)\b|$)",
+        lowered,
+    )
+    return bool(match and _port_in_numeric_spec(port, match.group(1)))
+
+
+def _rule_assessment(
+    backend: str,
+    port: int,
+    rules: List[str],
+    default_policy: Optional[str] = None,
+) -> Dict[str, Any]:
+    raw_matches = [
+        line.strip()
+        for line in rules
+        if _firewall_rule_mentions_port(line, port)
+    ][:20]
+    matches = [_redact_log_line(line)[:1000] for line in raw_matches]
+    actions = set()
+    for line in raw_matches:
+        lowered = re.sub(r'"[^"\n]*"|\'[^\'\n]*\'', "", line.lower())
+        if re.search(r"\b(?:accept|allow|pass)\b", lowered) or "-j accept" in lowered:
+            actions.add("allow")
+        if re.search(r"\b(?:block|drop|deny|reject)\b", lowered) or re.search(r"-j\s+(?:drop|reject)\b", lowered):
+            actions.add("deny")
+    normalized_policy = (default_policy or "").lower()
+    if actions == {"allow"}:
+        verdict = "explicit_allow_observed"
+    elif actions == {"deny"}:
+        verdict = "explicit_deny_observed"
+    elif len(actions) > 1:
+        verdict = "conflicting_rules_observed"
+    elif normalized_policy in {"drop", "deny", "reject", "block"}:
+        verdict = "default_deny_without_direct_match"
+    elif normalized_policy in {"accept", "allow", "pass"}:
+        verdict = "default_allow_without_direct_match"
+    else:
+        verdict = "indeterminate"
+    return {
+        "backend": backend,
+        "port": port,
+        "protocol": "tcp",
+        "verdict": verdict,
+        "default_policy": default_policy,
+        "matching_rules": matches,
+    }
+
+
+def _inspect_ufw(ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which("ufw")
+    if not executable:
+        return None
+    command = _diagnostic_command([executable, "status", "verbose"], timeout=timeout)
+    text = command.get("stdout", "") + command.get("stderr", "")
+    permission_limited = _firewall_permission_limited(command)
+    active = bool(re.search(r"(?im)^status:\s*active\s*$", text)) if command["ok"] else None
+    if re.search(r"(?im)^status:\s*inactive\s*$", text):
+        active = False
+    policy_match = re.search(r"(?im)^default:\s*(allow|deny|reject)\s*\(incoming\)", text)
+    default_policy = policy_match.group(1).lower() if policy_match else None
+    rule_lines = []
+    application_rules = []
+    for line in text.splitlines():
+        match = re.match(
+            r"^\s*(?:\[\s*\d+\]\s*)?(.+?)\s{2,}(ALLOW|DENY|REJECT|LIMIT)\s+IN\b",
+            line,
+        )
+        if not match:
+            continue
+        destination = match.group(1).strip()
+        action = "accept" if match.group(2) in {"ALLOW", "LIMIT"} else "drop"
+        if re.match(r"^\d", destination):
+            if "/udp" not in destination.lower():
+                rule_lines.append(f"tcp dport {destination.split('/', 1)[0]} {action} comment {line.strip()}")
+        elif destination.lower() in {"anywhere", "anywhere (v6)"}:
+            rule_lines.append(f"tcp dport any {action} comment {line.strip()}")
+        else:
+            profile = re.sub(r"\s+\(v6\)$", "", destination).strip()
+            if profile:
+                application_rules.append((profile, action, line.strip()))
+    for profile, action, original in list(dict.fromkeys(application_rules))[:20]:
+        profile_info = _diagnostic_command([executable, "app", "info", profile], timeout=timeout)
+        permission_limited = permission_limited or _firewall_permission_limited(profile_info)
+        if not profile_info["ok"]:
+            continue
+        for profile_line in profile_info.get("stdout", "").splitlines():
+            tcp_specs = re.findall(
+                r"(\d{1,5}(?:\s*[-:]\s*\d{1,5})?(?:\s*,\s*\d{1,5}(?:\s*[-:]\s*\d{1,5})?)*)/tcp\b",
+                profile_line,
+                re.IGNORECASE,
+            )
+            for port_spec in tcp_specs:
+                rule_lines.append(
+                    f"tcp dport {port_spec} {action} comment profile={profile} rule={original}"
+                )
+    assessments = []
+    for port in ports:
+        assessment = _rule_assessment("ufw", port, rule_lines, default_policy)
+        assessments.append(assessment)
+    return {
+        "name": "ufw", "role": "frontend", "available": True, "active": active,
+        "inspection": "permission_limited" if permission_limited else "ok" if command["ok"] else "failed",
+        "default_inbound_policy": default_policy,
+        "port_assessments": assessments,
+        "error": command.get("error") if not command["ok"] else None,
+    }
+
+
+def _parse_firewalld_zones(text: str) -> List[str]:
+    zones = []
+    for line in text.splitlines():
+        if line and not line[0].isspace():
+            zone = line.split()[0]
+            if re.fullmatch(r"[A-Za-z0-9_.-]+", zone):
+                zones.append(zone)
+    return list(dict.fromkeys(zones))[:32]
+
+
+def _firewalld_service_ports(
+    executable: str,
+    services: List[str],
+    timeout: float,
+) -> tuple[Dict[str, List[str]], bool]:
+    """Resolve active firewalld service names to declared TCP port specs."""
+    result: Dict[str, List[str]] = {}
+    permission_limited = False
+    for service in list(dict.fromkeys(services))[:64]:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", service):
+            continue
+        command = _diagnostic_command(
+            [executable, f"--info-service={service}"], timeout=timeout,
+        )
+        permission_limited = permission_limited or _firewall_permission_limited(command)
+        if not command["ok"]:
+            continue
+        specs: List[str] = []
+        for line in command.get("stdout", "").splitlines():
+            key, separator, value = line.strip().partition(":")
+            if separator and key.lower() == "ports":
+                specs.extend(
+                    item.rsplit("/", 1)[0]
+                    for item in value.split()
+                    if item.lower().endswith("/tcp")
+                )
+        result[service] = specs
+    return result, permission_limited
+
+
+def _inspect_firewalld(ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which("firewall-cmd")
+    if not executable:
+        return None
+    state = _diagnostic_command([executable, "--state"], timeout=timeout)
+    permission_limited = _firewall_permission_limited(state)
+    state_text = (state.get("stdout", "") + state.get("stderr", "")).strip().lower()
+    active = state["ok"] and state_text == "running"
+    state_known = active or "not running" in state_text
+    zones: List[Dict[str, Any]] = []
+    if active:
+        active_zones = _diagnostic_command([executable, "--get-active-zones"], timeout=timeout)
+        permission_limited = permission_limited or _firewall_permission_limited(active_zones)
+        for zone_name in _parse_firewalld_zones(active_zones.get("stdout", "")):
+            details = _diagnostic_command([executable, f"--zone={zone_name}", "--list-all"], timeout=timeout)
+            permission_limited = permission_limited or _firewall_permission_limited(details)
+            values: Dict[str, str] = {}
+            for line in details.get("stdout", "").splitlines():
+                key, separator, value = line.strip().partition(":")
+                if separator:
+                    values[key] = value.strip()
+            rich_rules = [
+                line.strip()
+                for line in details.get("stdout", "").splitlines()
+                if line.strip().startswith("rule ")
+            ]
+            zones.append({
+                "name": zone_name,
+                "interfaces": values.get("interfaces", "").split(),
+                "sources": values.get("sources", "").split(),
+                "services": values.get("services", "").split(),
+                "ports": values.get("ports", "").split(),
+                "target": values.get("target"),
+                "rich_rules": rich_rules[:128],
+            })
+    service_names = [
+        service
+        for zone_details in zones
+        for service in zone_details["services"]
+    ]
+    service_ports, service_limited = _firewalld_service_ports(
+        executable, service_names, timeout,
+    ) if active else ({}, False)
+    permission_limited = permission_limited or service_limited
+    assessments = []
+    for port in ports:
+        rules = []
+        policies = []
+        for zone_details in zones:
+            zone_name = zone_details["name"]
+            for spec in zone_details["ports"]:
+                if spec.lower().endswith("/tcp"):
+                    rules.append(
+                        f"tcp dport {spec.rsplit('/', 1)[0]} accept comment zone={zone_name}"
+                    )
+            for service in zone_details["services"]:
+                for spec in service_ports.get(service, []):
+                    rules.append(
+                        f"tcp dport {spec} accept comment zone={zone_name} service={service}"
+                    )
+            rules.extend(
+                f"{rich_rule} comment zone={zone_name}"
+                for rich_rule in zone_details.get("rich_rules", [])
+            )
+            target = str(zone_details.get("target") or "").strip("%").lower()
+            if target in {"accept", "drop", "reject"}:
+                policies.append(target)
+        policy = (
+            policies[0]
+            if zones and len(policies) == len(zones) and len(set(policies)) == 1
+            else None
+        )
+        assessments.append(_rule_assessment("firewalld", port, rules, policy))
+    return {
+        "name": "firewalld", "role": "frontend", "available": True, "active": active,
+        "inspection": "permission_limited" if permission_limited else "ok" if state["ok"] or state_known else "failed",
+        "zones": zones, "port_assessments": assessments,
+        "error": state.get("error") if not state["ok"] and not state_known else None,
+    }
+
+
+def _nft_input_rules(text: str) -> tuple[List[str], List[str]]:
+    rules: List[str] = []
+    policies: List[str] = []
+    chain_lines: List[str] = []
+    in_chain = False
+    depth = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("chain ") and stripped.endswith("{"):
+            in_chain = True
+            depth = 1
+            chain_lines = []
+            continue
+        if not in_chain:
+            continue
+        depth += stripped.count("{") - stripped.count("}")
+        if depth <= 0:
+            block = "\n".join(chain_lines)
+            if re.search(r"\bhook\s+input\b", block):
+                policies.extend(re.findall(r"\bpolicy\s+(accept|drop|reject)\b", block, re.IGNORECASE))
+                rules.extend(
+                    chain_line
+                    for chain_line in chain_lines
+                    if not re.search(r"\bhook\s+input\b", chain_line)
+                    and not re.match(r"^policy\s+", chain_line)
+                )
+            in_chain = False
+            chain_lines = []
+        else:
+            chain_lines.append(stripped)
+    return rules, policies
+
+
+def _inspect_nftables(ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which("nft")
+    if not executable:
+        return None
+    command = _diagnostic_command([executable, "-n", "list", "ruleset"], timeout=timeout)
+    permission_limited = _firewall_permission_limited(command)
+    rules, policies = _nft_input_rules(command.get("stdout", "")) if command["ok"] else ([], [])
+    policy = policies[0].lower() if len(set(value.lower() for value in policies)) == 1 and policies else None
+    return {
+        "name": "nftables", "role": "backend", "available": True,
+        "active": bool(rules or policies) if command["ok"] else None,
+        "inspection": "permission_limited" if permission_limited else "ok" if command["ok"] else "failed",
+        "default_inbound_policy": policy,
+        "input_chain_count": len(policies),
+        "port_assessments": [_rule_assessment("nftables", port, rules, policy) for port in ports],
+        "error": command.get("error") if not command["ok"] else None,
+    }
+
+
+def _inspect_iptables_command(name: str, ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which(name)
+    if not executable:
+        return None
+    command = _diagnostic_command([executable, "-S", "INPUT"], timeout=timeout)
+    permission_limited = _firewall_permission_limited(command)
+    lines = command.get("stdout", "").splitlines() if command["ok"] else []
+    policy_match = re.search(r"(?m)^-P\s+INPUT\s+(ACCEPT|DROP|REJECT)\b", command.get("stdout", ""))
+    policy = policy_match.group(1).lower() if policy_match else None
+    return {
+        "name": name, "role": "backend", "available": True,
+        "active": bool(lines) if command["ok"] else None,
+        "inspection": "permission_limited" if permission_limited else "ok" if command["ok"] else "failed",
+        "default_inbound_policy": policy,
+        "port_assessments": [_rule_assessment(name, port, lines, policy) for port in ports],
+        "error": command.get("error") if not command["ok"] else None,
+    }
+
+
+def _inspect_windows_firewall(ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which("powershell") or shutil.which("pwsh")
+    if not executable:
+        return None
+    script = (
+        "$profiles=@(Get-NetFirewallProfile | ForEach-Object { "
+        "[pscustomobject]@{Name=$_.Name.ToString();Enabled=$_.Enabled;"
+        "DefaultInboundAction=$_.DefaultInboundAction.ToString()} });"
+        "$rules=@();"
+        + (
+            "$rules=@(Get-NetFirewallRule -Enabled True -Direction Inbound | ForEach-Object { "
+            "$rule=$_; @($rule | Get-NetFirewallPortFilter) | Where-Object { "
+            "$_.Protocol -eq 'TCP' -or $_.Protocol -eq 6 } | ForEach-Object { "
+            "[pscustomobject]@{Name=$rule.DisplayName;Action=$rule.Action.ToString();"
+            "LocalPort=$_.LocalPort;Profile=$rule.Profile.ToString()} } } | Select-Object -First 512);"
+            if ports else ""
+        )
+        + "[pscustomobject]@{Profiles=$profiles;Rules=$rules} | ConvertTo-Json -Depth 4 -Compress"
+    )
+    command = _diagnostic_command(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", script], timeout=timeout,
+    )
+    profiles: List[Dict[str, Any]] = []
+    firewall_rules: List[Dict[str, Any]] = []
+    parsed_ok = False
+    if command["ok"]:
+        try:
+            parsed = json.loads(command["stdout"])
+            if isinstance(parsed, dict):
+                raw_profiles = parsed.get("Profiles", [])
+                raw_rules = parsed.get("Rules", [])
+                profiles = raw_profiles if isinstance(raw_profiles, list) else [raw_profiles]
+                firewall_rules = raw_rules if isinstance(raw_rules, list) else [raw_rules]
+                parsed_ok = True
+        except (json.JSONDecodeError, TypeError):
+            pass
+    active = any(bool(item.get("Enabled")) for item in profiles) if parsed_ok else None
+    default_values = {
+        str(item.get("DefaultInboundAction", "")).lower()
+        for item in profiles if item.get("Enabled")
+    }
+    policy = next(iter(default_values)) if len(default_values) == 1 else None
+    normalized_rules = [
+        f"tcp dport {item.get('LocalPort', '')} {item.get('Action', '')} "
+        f"comment profile={item.get('Profile', '')}"
+        for item in firewall_rules
+        if item.get("LocalPort") not in {None, ""}
+    ]
+    return {
+        "name": "windows-firewall", "role": "backend", "available": True,
+        "active": active if command["ok"] else None,
+        "inspection": "permission_limited" if _firewall_permission_limited(command) else "ok" if command["ok"] and parsed_ok else "failed",
+        "profiles": profiles, "default_inbound_policy": policy,
+        "inspected_rule_count": len(firewall_rules),
+        "port_assessments": [
+            _rule_assessment("windows-firewall", port, normalized_rules, policy)
+            for port in ports
+        ],
+        "error": command.get("error") if not command["ok"] else None if parsed_ok else "PowerShell returned an unreadable firewall result",
+    }
+
+
+def _inspect_pf(ports: List[int], timeout: float) -> Optional[Dict[str, Any]]:
+    executable = shutil.which("pfctl")
+    if not executable:
+        return None
+    info = _diagnostic_command([executable, "-s", "info"], timeout=timeout)
+    rules_command = _diagnostic_command([executable, "-sr"], timeout=timeout)
+    permission_limited = _firewall_permission_limited(info) or _firewall_permission_limited(rules_command)
+    active_match = re.search(r"(?im)^status:\s*(enabled|disabled)", info.get("stdout", ""))
+    active = active_match.group(1).lower() == "enabled" if active_match else None
+    rules = rules_command.get("stdout", "").splitlines() if rules_command["ok"] else []
+    return {
+        "name": "pf", "role": "backend", "available": True, "active": active,
+        "inspection": "permission_limited" if permission_limited else "ok" if info["ok"] else "failed",
+        "port_assessments": [_rule_assessment("pf", port, rules) for port in ports],
+        "error": info.get("error") if not info["ok"] else None,
+    }
+
+
+def firewall_diagnostic(
+    ports: Optional[List[int]] = None,
+    timeout: float = 5.0,
+    symptom: Optional[str] = None,
+    expected: Optional[str] = None,
+    recent_change: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Inspect host firewall state and cautiously correlate inbound TCP ports."""
+    if timeout <= 0:
+        raise ValueError("Timeout must be greater than zero")
+    selected_ports = list(dict.fromkeys(ports or []))
+    if len(selected_ports) > 32:
+        raise ValueError("A firewall diagnostic accepts at most 32 ports")
+    for port in selected_ports:
+        _validate_port(port)
+    target = ",".join(str(port) for port in selected_ports) or "host firewall"
+    context = _diagnostic_context(target, symptom, expected, recent_change)
+    system = platform.system().lower()
+    backends: List[Dict[str, Any]] = []
+    inspectors: List[Any]
+    if system == "linux":
+        inspectors = [
+            _inspect_ufw, _inspect_firewalld, _inspect_nftables,
+            lambda values, limit: _inspect_iptables_command("iptables", values, limit),
+            lambda values, limit: _inspect_iptables_command("ip6tables", values, limit),
+        ]
+    elif system == "windows":
+        inspectors = [_inspect_windows_firewall]
+    elif system in {"darwin", "freebsd", "openbsd"}:
+        inspectors = [_inspect_pf]
+    else:
+        inspectors = []
+    for inspector in inspectors:
+        result = inspector(selected_ports, timeout)
+        if result:
+            backends.append(result)
+    active = [item for item in backends if item.get("active") is True]
+    limited = [item["name"] for item in backends if item.get("inspection") in {"permission_limited", "failed"}]
+    assessments = []
+    findings = []
+    for port in selected_ports:
+        observations = [
+            assessment
+            for backend in active
+            for assessment in backend.get("port_assessments", [])
+            if assessment.get("port") == port
+        ]
+        verdicts = {item.get("verdict") for item in observations}
+        if "explicit_deny_observed" in verdicts or "conflicting_rules_observed" in verdicts:
+            verdict = "potentially_blocked"
+        elif "default_deny_without_direct_match" in verdicts and "explicit_allow_observed" not in verdicts:
+            verdict = "no_allow_observed_with_default_deny"
+        elif "explicit_allow_observed" in verdicts:
+            verdict = "allow_rule_observed"
+        elif active and verdicts == {"default_allow_without_direct_match"}:
+            verdict = "no_local_block_observed"
+        elif not active and backends and not limited:
+            verdict = "no_active_host_firewall_detected"
+        else:
+            verdict = "indeterminate"
+        assessment = {
+            "port": port, "protocol": "tcp", "verdict": verdict,
+            "backend_observations": observations,
+        }
+        assessments.append(assessment)
+        if verdict == "potentially_blocked":
+            findings.append(_finding(
+                "firewall_port_potentially_blocked", "warning",
+                f"An observed host-firewall rule may block inbound TCP port {port}.",
+                evidence=", ".join(sorted(
+                    {item["backend"] for item in observations if item.get("verdict") in {"explicit_deny_observed", "conflicting_rules_observed"}}
+                )),
+                recommendation="Confirm source address, interface, address family, rule order, counters, and network namespace before changing policy.",
+                phase="firewall",
+            ))
+        elif verdict == "no_allow_observed_with_default_deny":
+            findings.append(_finding(
+                "firewall_port_not_explicitly_allowed", "warning",
+                f"No direct allow for TCP port {port} was observed under a default-deny inbound policy.",
+                recommendation="Inspect referenced chains, sets, zones, source restrictions, address family, and counters before concluding that the port is blocked.",
+                phase="firewall",
+            ))
+    if limited:
+        findings.append(_finding(
+            "firewall_inspection_limited", "warning" if selected_ports else "info",
+            "Some installed firewall controls could not be fully inspected by the current account.",
+            evidence=", ".join(limited),
+            recommendation="Repeat with an account that can list the ruleset; SysAdminToolbox never invokes sudo itself.",
+            phase="firewall",
+        ))
+    if not backends:
+        findings.append(_finding(
+            "firewall_tooling_unavailable", "info",
+            "No supported host-firewall inspection command was found.",
+            recommendation="Check the host platform and any external firewall, security group, load balancer, or container policy.",
+            phase="firewall",
+        ))
+    findings = _deduplicate_findings(findings)
+    correlation_warning = any(item["severity"] == "warning" for item in findings)
+    steps = [
+        _diagnostic_step(
+            "context", "Define the affected inbound service ports",
+            "passed" if selected_ports or _has_operator_context(context) else "warning",
+            f"Assessing inbound TCP port(s): {', '.join(map(str, selected_ports))}." if selected_ports else
+            "No ports were supplied; only firewall discovery is performed.",
+        ),
+        _diagnostic_step(
+            "discovery", "Discover host firewall managers and backends",
+            "passed" if backends else "not_applicable",
+            f"Found {len(backends)} supported firewall control(s)." if backends else
+            "No supported firewall command was found on this platform.",
+            depends_on=["context"],
+        ),
+        _diagnostic_step(
+            "rules", "Read active inbound policy without changing it",
+            "warning" if limited else "passed" if active else "not_applicable",
+            f"Inspected {len(active)} active control(s)." if active else
+            "Inspection was limited by permissions." if limited else "No active supported host firewall was detected.",
+            depends_on=["discovery"],
+        ),
+        _diagnostic_step(
+            "ports", "Correlate policy with service ports",
+            "warning" if correlation_warning else "passed" if selected_ports and assessments else "skipped",
+            f"Produced {len(assessments)} cautious port assessment(s)." if assessments else
+            "Supply one or more ports to correlate firewall policy with a service.",
+            layer="OSI 3-4", depends_on=["rules"],
+        ),
+        _diagnostic_step(
+            "external_boundary", "Separate host policy from upstream controls", "not_applicable",
+            "Host inspection cannot observe cloud security groups, routers, load balancers, provider ACLs, or another network namespace.",
+            layer="Network path", depends_on=["ports"],
+        ),
+    ]
+    return {
+        "status": _diagnostic_status(findings), "read_only": True,
+        "context": context,
+        "methodology": _methodology(
+            "host-firewall", "Discover active host controls, inspect inbound policy, correlate only the requested service ports, and keep upstream controls outside the proof boundary.", steps,
+        ),
+        "platform": platform.system(), "ports": selected_ports,
+        "backends": backends, "active_backends": [item["name"] for item in active],
+        "port_assessments": assessments,
+        "scope_limit": "Local host rules only; external and namespace-specific controls require separate evidence.",
+        "cause_candidates": _rank_cause_candidates(findings), "findings": findings,
     }
 
 
@@ -4303,7 +4889,9 @@ def system_diagnostic(
                 phase="logs",
             ))
     network = network_diagnostic(timeout=timeout)
+    firewall = firewall_diagnostic(timeout=timeout)
     findings.extend(network["findings"])
+    findings.extend(firewall["findings"])
     findings = _deduplicate_findings(findings)
     critical_resource = any(
         item.get("severity") == "critical" and item.get("phase") in {"resources", "capacity", "inodes", "mount"}
@@ -4356,13 +4944,23 @@ def system_diagnostic(
             "failed" if network_status == "failed" else "warning" if network_status == "warning" else "passed",
             "Ran the bottom-up local network diagnostic.", depends_on=["identity"],
         ),
+        _diagnostic_step(
+            "firewall", "Discover local host firewall controls",
+            "failed" if firewall.get("status") == "failed" else
+            "warning" if firewall.get("status") == "warning" or any(
+                item.get("inspection") in {"permission_limited", "failed"}
+                for item in firewall.get("backends", [])
+            ) else "passed",
+            f"Observed {len(firewall.get('active_backends', []))} active supported firewall control(s).",
+            layer="OSI 3-4", depends_on=["network"],
+        ),
     ]
     return {
         "status": _diagnostic_status(findings),
         "read_only": True,
         "context": context,
         "methodology": _methodology(
-            "host-health", "Define the symptom, rule out hard resource blockers, inspect processes and services, correlate logs, then verify network prerequisites.", steps,
+            "host-health", "Define the symptom, rule out hard resource blockers, inspect processes and services, correlate logs, then verify network and host-firewall prerequisites.", steps,
         ),
         "host": {
             "hostname": socket.gethostname(), "platform": platform.system(),
@@ -4377,6 +4975,7 @@ def system_diagnostic(
         "time_sync": time_sync,
         "disk": disk,
         "network": network,
+        "firewall": firewall,
         "failed_services": failed_services,
         "journal": journal,
         "logs_requested": include_logs,
@@ -5043,6 +5642,8 @@ def nginx_diagnostic(
                 recommendation="Confirm the master-process privileges, network namespace, and effective server configuration.",
                 phase="listeners",
             ))
+    firewall = firewall_diagnostic(parsed.get("listen_ports", []), timeout=timeout)
+    findings.extend(firewall["findings"])
     http_probe = None
     branch_summary = "No HTTP symptom was supplied."
     if url:
@@ -5152,7 +5753,10 @@ def nginx_diagnostic(
     findings = _deduplicate_findings(findings)
     phase_findings = {
         phase: [item for item in findings if item.get("phase") == phase]
-        for phase in ("runtime", "configuration", "application_logs", "listeners", "application", "path_access")
+        for phase in (
+            "runtime", "configuration", "application_logs", "listeners",
+            "firewall", "application", "path_access",
+        )
     }
     config_status = (
         "failed" if any(item.get("severity") == "critical" for item in phase_findings["configuration"]) else
@@ -5221,8 +5825,17 @@ def nginx_diagnostic(
             layer="OSI 4", depends_on=["runtime", "configuration"],
         ),
         _diagnostic_step(
+            "firewall", "Correlate listening ports with host firewall policy",
+            "failed" if firewall.get("status") == "failed" else
+            "warning" if firewall.get("status") == "warning" else
+            "passed" if parsed.get("listen_ports") else "skipped",
+            f"Assessed {len(firewall.get('port_assessments', []))} configured TCP port(s)." if parsed.get("listen_ports") else
+            "No numeric TCP listener was recovered from the effective configuration.",
+            layer="OSI 3-4", depends_on=["listeners"],
+        ),
+        _diagnostic_step(
             "application", "Probe the selected virtual host", application_status,
-            branch_summary, layer="OSI 6-7", depends_on=["listeners"],
+            branch_summary, layer="OSI 6-7", depends_on=["firewall"],
             evidence={
                 "host_header": http_probe.get("host_header") if http_probe else None,
                 "tls_server_name": (http_probe.get("tls") or {}).get("server_name") if http_probe else None,
@@ -5252,6 +5865,7 @@ def nginx_diagnostic(
         "configuration": parsed,
         "service": service,
         "listening_sockets": sockets,
+        "firewall": firewall,
         "path_access": path_checks,
         "security_frameworks": security,
         "filesystems": disks,
@@ -6164,15 +6778,16 @@ def _setup_parser():
     # -- doctor --
     p = sub.add_parser(
         "doctor", aliases=["diag", "diagnose"], parents=[shared],
-        help="Read-only system, service, disk, network, and Nginx diagnostics",
+        help="Read-only system, service, disk, network, firewall, and Nginx diagnostics",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=(
             "Examples:\n"
             "  doctor system\n"
             "  doctor system --logs system --since '30 minutes ago'\n"
             "  doctor disk /var --du\n"
-            "  doctor service postgresql --logs service\n"
+            "  doctor service postgresql --port 5432 --logs service\n"
             "  doctor network database.internal --port 5432\n"
+            "  doctor firewall 80,443\n"
             "  doctor nginx --url http://127.0.0.1 --host-header example.com\n"
             "  doctor nginx --url https://127.0.0.1 --host-header example.com --sni example.com\n"
             "  doctor nginx --logs all --lines 100\n\n"
@@ -6183,12 +6798,12 @@ def _setup_parser():
     )
     p.add_argument(
         "op", nargs="?", default="system",
-        choices=["system", "general", "nginx", "service", "disk", "network"],
+        choices=["system", "general", "nginx", "service", "disk", "network", "firewall"],
         help="Diagnostic to run (default: system)",
     )
     p.add_argument(
         "target", nargs="?", default="",
-        help="Service name, filesystem path, or optional network endpoint",
+        help="Service name, path, endpoint, or comma-separated firewall ports",
     )
     p.add_argument("--url", help="HTTP/HTTPS URL to probe during an Nginx diagnostic")
     p.add_argument("--host-header", help="Explicit Host header for the Nginx URL probe")
@@ -6214,7 +6829,10 @@ def _setup_parser():
         help="Disable log redaction (may expose credentials or personal data)",
     )
     p.add_argument("--du", action="store_true", help="Collect top-level disk usage (may be slow)")
-    p.add_argument("--port", type=int, default=443, help="Default TCP port for doctor network")
+    p.add_argument(
+        "--port", type=int,
+        help="TCP port for network, service, or firewall correlation",
+    )
     p.add_argument("--timeout", type=float, default=10.0, help="Per-check timeout in seconds")
     p.add_argument("--symptom", help="Observed behavior or error (maximum 500 characters)")
     p.add_argument("--expected", help="Expected behavior (maximum 500 characters)")
@@ -6840,6 +7458,20 @@ def _dispatch_net(args):
         output(ports, label="ports")
 
 
+def _parse_firewall_ports(value: str, extra_port: Optional[int] = None) -> List[int]:
+    ports = []
+    for token in re.split(r"[,\s]+", value.strip()) if value.strip() else []:
+        if not token.isdigit():
+            raise ValueError(f"Invalid firewall port: {token}")
+        ports.append(_validate_port(int(token)))
+    if extra_port is not None:
+        ports.append(_validate_port(extra_port))
+    result = list(dict.fromkeys(ports))
+    if len(result) > 32:
+        raise ValueError("A firewall diagnostic accepts at most 32 ports")
+    return result
+
+
 def _dispatch_doctor(args):
     if args.timeout <= 0:
         raise ValueError("Timeout must be greater than zero")
@@ -6852,6 +7484,8 @@ def _dispatch_doctor(args):
         raise ValueError("--url, --host-header, --sni, --follow-redirects, --insecure, and --config apply only to doctor nginx")
     if operation not in {"system", "disk"} and args.du:
         raise ValueError("--du applies only to doctor system or doctor disk")
+    if operation not in {"network", "service", "firewall"} and args.port is not None:
+        raise ValueError("--port applies only to doctor network, doctor service, or doctor firewall")
     if operation == "system":
         if args.logs not in {"none", "system", "all"}:
             raise ValueError("doctor system supports --logs none, system, or all")
@@ -6870,19 +7504,27 @@ def _dispatch_doctor(args):
         )
     elif operation == "service":
         if not args.target:
-            raise ValueError("Usage: doctor service NAME [--logs service]")
+            raise ValueError("Usage: doctor service NAME [--port PORT] [--logs service]")
         if args.logs not in {"none", "service", "all"}:
             raise ValueError("doctor service supports --logs none, service, or all")
         result = service_diagnostic(
             args.target, include_logs=args.logs != "none", lines=args.lines,
             since=args.since, raw_logs=args.raw_logs, timeout=args.timeout,
             symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
+            port=args.port,
         )
     elif operation == "network":
         if args.logs != "none" or args.raw_logs:
             raise ValueError("doctor network does not read logs")
         result = network_diagnostic(
-            args.target or None, port=args.port, timeout=args.timeout,
+            args.target or None, port=args.port or 443, timeout=args.timeout,
+            symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
+        )
+    elif operation == "firewall":
+        if args.logs != "none" or args.raw_logs:
+            raise ValueError("doctor firewall does not read logs")
+        result = firewall_diagnostic(
+            _parse_firewall_ports(args.target, args.port), timeout=args.timeout,
             symptom=args.symptom, expected=args.expected, recent_change=args.recent_change,
         )
     elif operation == "nginx":
@@ -7008,7 +7650,7 @@ def _repl():
             print(f"  {c.YELLOW}ipv6{c.RESET}    (v6)  expand, compress, tobin, type, subnet")
             print(f"  {c.YELLOW}mac{c.RESET}     (m)   info, format, normalize, vendor")
             print(f"  {c.YELLOW}net{c.RESET}     (n)   ping, portscan, traceroute, whois, dns, rdns")
-            print(f"  {c.YELLOW}doctor{c.RESET}  (diag) system, nginx, service, disk, network")
+            print(f"  {c.YELLOW}doctor{c.RESET}  (diag) system, nginx, service, disk, network, firewall")
             print(f"  {c.YELLOW}vendor{c.RESET}  (v)   vlan, acl")
             print(f"  {c.YELLOW}cheat{c.RESET}   (cs)  vlan, acl, huawei, mikrotik, firewall, routing, nat")
             print(f"\n  {c.DIM}Flags: --json, --no-color{c.RESET}")

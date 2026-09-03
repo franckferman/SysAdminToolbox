@@ -1118,6 +1118,30 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(process_step["status"], "passed")
         self.assertIn("321", process_step["summary"])
 
+    @patch.object(sat, "firewall_diagnostic")
+    @patch.object(sat, "_process_matches", return_value=[])
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat, "_service_manager", return_value="systemd")
+    def test_service_diagnostic_correlates_explicit_port(self, _manager, command, _processes, firewall):
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=321\nExecMainStatus=0\n",
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        firewall.return_value = {
+            "status": "warning",
+            "findings": [{
+                "code": "firewall_port_not_explicitly_allowed", "severity": "warning",
+                "summary": "No direct allow was observed.", "phase": "firewall",
+            }],
+        }
+        result = sat.service_diagnostic("postgresql", port=5432)
+        firewall.assert_called_once_with([5432], timeout=10.0)
+        self.assertEqual(result["status"], "warning")
+        self.assertIsNotNone(result["firewall"])
+        step = next(item for item in result["methodology"]["steps"] if item["id"] == "firewall")
+        self.assertEqual(step["status"], "warning")
+
     @patch.object(sat, "tcp_probe", return_value={"status": "failed", "error": "refused"})
     @patch.object(sat, "resolve_all", return_value={"status": "ok", "addresses": [{"address": "192.0.2.1"}]})
     @patch.object(sat, "_listening_sockets", return_value={"available": True, "listeners": []})
@@ -1160,6 +1184,176 @@ class DiagnosticTests(unittest.TestCase):
                 "target_route", "transport", "application",
             ],
         )
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which")
+    @patch.object(sat.platform, "system", return_value="Linux")
+    def test_firewall_diagnostic_correlates_nftables_ports(self, _system, which, command):
+        which.side_effect = lambda name: "/usr/sbin/nft" if name == "nft" else None
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": (
+                "table inet filter {\n"
+                "  chain input {\n"
+                "    type filter hook input priority filter; policy drop;\n"
+                "    tcp dport 80 accept\n"
+                "    tcp dport 443 drop\n"
+                "  }\n"
+                "}\n"
+            ),
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        result = sat.firewall_diagnostic([80, 443, 8080])
+        verdicts = {item["port"]: item["verdict"] for item in result["port_assessments"]}
+        self.assertEqual(result["active_backends"], ["nftables"])
+        self.assertEqual(verdicts[80], "allow_rule_observed")
+        self.assertEqual(verdicts[443], "potentially_blocked")
+        self.assertEqual(verdicts[8080], "no_allow_observed_with_default_deny")
+        self.assertEqual(result["status"], "warning")
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which")
+    def test_ufw_inspection_parses_numeric_inbound_rules(self, which, command):
+        which.return_value = "/usr/sbin/ufw"
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": (
+                "Status: active\n"
+                "Default: deny (incoming), allow (outgoing), disabled (routed)\n\n"
+                "To                         Action      From\n"
+                "--                         ------      ----\n"
+                "80/tcp                     ALLOW IN    Anywhere\n"
+                "443/tcp                    DENY IN     Anywhere\n"
+                "53/udp                     ALLOW IN    Anywhere\n"
+            ),
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        result = sat._inspect_ufw([80, 443, 8080], 1)
+        self.assertIsNotNone(result)
+        assessments = {item["port"]: item["verdict"] for item in result["port_assessments"]}
+        self.assertEqual(assessments[80], "explicit_allow_observed")
+        self.assertEqual(assessments[443], "explicit_deny_observed")
+        self.assertEqual(assessments[8080], "default_deny_without_direct_match")
+        self.assertEqual(
+            sat._inspect_ufw([53], 1)["port_assessments"][0]["verdict"],
+            "default_deny_without_direct_match",
+        )
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which", return_value="/usr/sbin/ufw")
+    def test_ufw_inspection_resolves_application_profiles(self, _which, command):
+        def response(argv, **_kwargs):
+            stdout = (
+                "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"
+                "Nginx Full                  ALLOW IN    Anywhere\n"
+            ) if argv[1:3] == ["status", "verbose"] else (
+                "Profile: Nginx Full\nPorts:\n  80,443/tcp\n"
+            )
+            return {
+                "available": True, "ok": True, "returncode": 0,
+                "stdout": stdout, "stderr": "", "error": None, "elapsed_ms": 1,
+            }
+        command.side_effect = response
+        result = sat._inspect_ufw([80, 443, 8080], 1)
+        self.assertIsNotNone(result)
+        assessments = {item["port"]: item["verdict"] for item in result["port_assessments"]}
+        self.assertEqual(assessments[80], "explicit_allow_observed")
+        self.assertEqual(assessments[443], "explicit_allow_observed")
+        self.assertEqual(assessments[8080], "default_deny_without_direct_match")
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which", return_value="/usr/bin/firewall-cmd")
+    def test_firewalld_resolves_services_ports_and_rich_rules(self, _which, command):
+        def response(argv, **_kwargs):
+            if "--state" in argv:
+                stdout = "running\n"
+            elif "--get-active-zones" in argv:
+                stdout = "public\n  interfaces: eth0\n"
+            elif "--list-all" in argv:
+                stdout = (
+                    "public (active)\n  target: default\n  interfaces: eth0\n"
+                    "  services: customweb\n  ports: 8443/tcp\n  rich rules:\n"
+                    "    rule family=\"ipv4\" port port=\"9443\" protocol=\"tcp\" reject\n"
+                )
+            else:
+                stdout = "customweb\n  ports: 8080/tcp\n"
+            return {
+                "available": True, "ok": True, "returncode": 0,
+                "stdout": stdout, "stderr": "", "error": None, "elapsed_ms": 1,
+            }
+        command.side_effect = response
+        result = sat._inspect_firewalld([8080, 8443, 9443, 9999], 1)
+        self.assertIsNotNone(result)
+        assessments = {item["port"]: item["verdict"] for item in result["port_assessments"]}
+        self.assertEqual(assessments[8080], "explicit_allow_observed")
+        self.assertEqual(assessments[8443], "explicit_allow_observed")
+        self.assertEqual(assessments[9443], "explicit_deny_observed")
+        self.assertEqual(assessments[9999], "indeterminate")
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which")
+    @patch.object(sat.platform, "system", return_value="Linux")
+    def test_firewall_permission_limits_are_warnings_only_for_port_correlation(
+        self, _system, which, command,
+    ):
+        which.side_effect = lambda name: "/usr/sbin/nft" if name == "nft" else None
+        command.return_value = {
+            "available": True, "ok": False, "returncode": 1,
+            "stdout": "", "stderr": "Operation not permitted", "error": "exit status 1",
+            "elapsed_ms": 1,
+        }
+        correlated = sat.firewall_diagnostic([443])
+        discovery = sat.firewall_diagnostic([])
+        self.assertEqual(correlated["status"], "warning")
+        self.assertEqual(discovery["status"], "ok")
+        self.assertEqual(correlated["port_assessments"][0]["verdict"], "indeterminate")
+
+    def test_pf_rule_actions_are_understood(self):
+        allow = sat._rule_assessment(
+            "pf", 80, ["pass in proto tcp from any to any port = 80"],
+        )
+        deny = sat._rule_assessment(
+            "pf", 443, ["block in proto tcp from any to any port = 443"],
+        )
+        self.assertEqual(allow["verdict"], "explicit_allow_observed")
+        self.assertEqual(deny["verdict"], "explicit_deny_observed")
+
+        blanket = sat._rule_assessment(
+            "iptables", 8443, ["-A INPUT -j DROP"], "accept",
+        )
+        established = sat._rule_assessment(
+            "iptables", 8443,
+            ["-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"],
+            "drop",
+        )
+        self.assertEqual(blanket["verdict"], "explicit_deny_observed")
+        self.assertEqual(established["verdict"], "default_deny_without_direct_match")
+        misleading_comment = sat._rule_assessment(
+            "nftables", 443,
+            ['tcp dport 443 comment "deny is only a label" accept'],
+        )
+        self.assertEqual(misleading_comment["verdict"], "explicit_allow_observed")
+
+    @patch.object(sat, "_diagnostic_command")
+    @patch.object(sat.shutil, "which", return_value="C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    def test_windows_firewall_inspection_correlates_rules(self, _which, command):
+        command.return_value = {
+            "available": True, "ok": True, "returncode": 0,
+            "stdout": json.dumps({
+                "Profiles": [{"Name": "Public", "Enabled": True, "DefaultInboundAction": "Block"}],
+                "Rules": [
+                    {"Name": "Web", "Action": "Allow", "LocalPort": "443", "Profile": "Public"},
+                    {"Name": "Legacy", "Action": "Block", "LocalPort": "8080-8089", "Profile": "Public"},
+                ],
+            }),
+            "stderr": "", "error": None, "elapsed_ms": 1,
+        }
+        result = sat._inspect_windows_firewall([443, 8085, 9999], 1)
+        self.assertIsNotNone(result)
+        assessments = {item["port"]: item["verdict"] for item in result["port_assessments"]}
+        self.assertEqual(assessments[443], "explicit_allow_observed")
+        self.assertEqual(assessments[8085], "explicit_deny_observed")
+        self.assertEqual(assessments[9999], "default_deny_without_direct_match")
 
     def test_nginx_configuration_parser_extracts_only_diagnostic_metadata(self):
         configuration = """# configuration file /etc/nginx/nginx.conf:
@@ -1257,6 +1451,7 @@ server {
         codes = {item["code"] for item in findings}
         self.assertTrue({"nginx_upstream_connect", "nginx_permission_denied", "nginx_access_403", "nginx_access_404"} <= codes)
 
+    @patch.object(sat, "firewall_diagnostic", return_value={"status": "ok", "findings": [], "port_assessments": []})
     @patch.object(sat, "disk_diagnostic", return_value={"status": "ok", "findings": []})
     @patch.object(sat, "_security_frameworks", return_value={"selinux": "Disabled", "apparmor": None, "path_contexts": []})
     @patch.object(sat, "_path_access_for_user", return_value={"traversable": True})
@@ -1265,7 +1460,7 @@ server {
     @patch.object(sat, "service_diagnostic")
     @patch.object(sat, "_diagnostic_command")
     def test_nginx_diagnostic_correlates_syntax_service_config_and_logs(
-        self, command, service, sockets, tail, _path_access, _security, _disk,
+        self, command, service, sockets, tail, _path_access, _security, _disk, _firewall,
     ):
         configuration = """# configuration file /etc/nginx/nginx.conf:
 user www-data;
@@ -1306,17 +1501,19 @@ root /srv/www;
             [step["id"] for step in result["methodology"]["steps"]],
             [
                 "context", "host_prerequisites", "runtime", "service_logs",
-                "configuration", "application_logs", "listeners", "application", "path_access",
+                "configuration", "application_logs", "listeners", "firewall",
+                "application", "path_access",
             ],
         )
 
+    @patch.object(sat, "firewall_diagnostic", return_value={"status": "ok", "findings": [], "active_backends": [], "backends": []})
     @patch.object(sat, "network_diagnostic", return_value={"status": "ok", "findings": []})
     @patch.object(sat, "disk_diagnostic", return_value={"status": "ok", "findings": []})
     @patch.object(sat, "_linux_pressure", return_value={})
     @patch.object(sat, "_proc_memory", return_value={"available_percent": 4.0, "swap_used_percent": 0})
     @patch.object(sat, "_service_manager", return_value="unknown")
     @patch.object(sat.os, "getloadavg", return_value=(0.1, 0.1, 0.1), create=True)
-    def test_system_diagnostic_reports_resource_pressure(self, _load, _manager, _memory, _pressure, _disk, _network):
+    def test_system_diagnostic_reports_resource_pressure(self, _load, _manager, _memory, _pressure, _disk, _network, _firewall):
         result = sat.system_diagnostic(path="/", timeout=1)
         self.assertEqual(result["status"], "failed")
         self.assertIn("memory_critical", {item["code"] for item in result["findings"]})
@@ -1479,6 +1676,18 @@ class OutputAndCliTests(unittest.TestCase):
         self.assertEqual(result["context"]["symptom"], "writes fail")
         self.assertEqual(result["context"]["expected"], "writes succeed")
         self.assertEqual(result["methodology"]["steps"][0]["status"], "passed")
+
+    def test_doctor_firewall_cli_and_port_validation(self):
+        process = self.run_cli(
+            "doctor", "firewall", "80,443", "--timeout", "2", "--json",
+        )
+        self.assertIn(process.returncode, {0, 1}, process.stderr)
+        result = json.loads(process.stdout)
+        self.assertEqual(result["ports"], [80, 443])
+        self.assertTrue(result["read_only"])
+        invalid = self.run_cli("doctor", "firewall", "80,bad")
+        self.assertEqual(invalid.returncode, 1)
+        self.assertIn("Invalid firewall port", invalid.stderr)
 
     def test_legacy_cheatsheet_flag(self):
         current = self.run_cli("cs", "vlan")

@@ -16,7 +16,7 @@ SysAdminToolbox provides network calculations, operational checks, and configura
 
 - **Conversions** - Binary, decimal, hexadecimal, IPv4, masks, CIDR, wildcards, and IANA address classification.
 - **Address planning** - IPv4/IPv6 subnetting, VLSM, ranges, containment, exclusion, indexed addresses, overlap checks, supernets, and inventory audits.
-- **Diagnostics** - Read-only host, filesystem, inode, service, Nginx, listener, DNS, TCP/UDP, TLS, HTTP, and local network checks.
+- **Diagnostics** - Read-only host, filesystem, inode, service, Nginx, firewall, listener, DNS, TCP/UDP, TLS, HTTP, and local network checks.
 - **Batch operations** - Files or standard input, bounded concurrency, per-target results, and text, JSON, NDJSON, or CSV output.
 - **MAC utilities** - Normalization, generation, address properties, and optional vendor lookup from a locally cached IEEE OUI registry.
 - **Configuration** - Platform-aware VLAN and ACL generators for Cisco, Juniper, and Huawei.
@@ -62,6 +62,7 @@ The calculations use only Python. Some diagnostics use operating-system commands
 | System and service diagnostics | `systemctl`, `journalctl`, `rc-service`, `service`, `launchctl`, `sc`, `timedatectl`, `chronyc`, `ntpq`, or `w32tm` |
 | Listener and disk analysis | `ss` or `netstat`, plus optional `du` |
 | Nginx diagnostics | `nginx`, plus optional `getenforce` and security-context output from `ls` |
+| Host-firewall diagnostics | `ufw`, `firewall-cmd`, `nft`, `iptables`, `ip6tables`, Windows PowerShell, or `pfctl` when available |
 
 ## Usage
 
@@ -74,6 +75,7 @@ SysAdminToolbox convert ipclass 100.64.0.1
 SysAdminToolbox subnet calc 192.168.1.42/24
 SysAdminToolbox doctor system
 SysAdminToolbox doctor nginx --url http://127.0.0.1 --host-header example.com
+SysAdminToolbox doctor firewall 80,443
 SysAdminToolbox net doctor https://example.com
 SysAdminToolbox net wait database.internal 5432 --timeout 60
 SysAdminToolbox vendor profiles
@@ -91,7 +93,7 @@ Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the compl
 | `ipv6` (`v6`) | `expand`, `compress`, `tobin`, `type`, `subnet`, `ula` |
 | `mac` (`m`) | `info`, `format`, `normalize`, `vendor`, `generate`, `oui-update` |
 | `net` (`n`) | `doctor`, `wait`, `cert-audit`, `dns-health`, `local`, plus focused network checks |
-| `doctor` (`diag`, `diagnose`) | `system`, `nginx`, `service`, `disk`, `network` |
+| `doctor` (`diag`, `diagnose`) | `system`, `nginx`, `service`, `disk`, `network`, `firewall` |
 | `vendor` (`v`) | `profiles`, `vlan`, `acl` |
 | `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
 
@@ -164,17 +166,24 @@ SysAdminToolbox doctor system /var --du
 # Capacity, inode exhaustion, read-only mounts, and largest entries
 SysAdminToolbox doctor disk /var --du
 
-# Generic service state and exit information
-SysAdminToolbox doctor service postgresql
+# Generic service state and exit information, optionally correlated with its port
+SysAdminToolbox doctor service postgresql --port 5432
 
 # Bottom-up interface, addressing, route, DNS, TCP, and optional HTTP/TLS path
 SysAdminToolbox doctor network database.internal --port 5432
 SysAdminToolbox doctor network https://app.example.com/health
+
+# Host firewall discovery and cautious inbound TCP-port correlation
+SysAdminToolbox doctor firewall 80,443
 ```
 
 `doctor network` proceeds bottom-up: interface/link evidence, local addressing and routing prerequisites, name resolution, route selection for the resolved address, transport, then TLS/HTTP when the target is a URL. A failed DNS step explicitly skips target-route and transport checks instead of producing misleading secondary failures.
 
-`doctor nginx` follows an application-specific dependency path: host capacity, service manager plus running-process correlation, bounded service logs, binary discovery, `nginx -t`, expanded active configuration from `nginx -T`, configured logs, IP and Unix listeners, a direct virtual-host probe, and the relevant content/security-policy path. It branches its recommendations for TLS failures, connection failures, redirects, 401, 403, 404, and upstream-oriented 502/503/504 responses.
+`doctor firewall` discovers the host controls available on the current platform and correlates only the requested inbound TCP ports. On Linux it understands UFW application profiles, active firewalld zones and services, nftables input-hook chains, and IPv4/IPv6 iptables INPUT rules. It also supports Windows Firewall profiles and rules through PowerShell and PF on macOS and BSD. The result distinguishes an observed allow, an observed deny, a default-deny policy without a direct allow, an inactive firewall, insufficient privileges, and an indeterminate ruleset. It never invokes `sudo` or changes policy.
+
+These are local-host observations, not a proof of end-to-end reachability. Cloud security groups, provider firewalls, routers, load balancers, container or network namespaces, source restrictions, interface selection, rule order, jumps, sets, and state tracking can change the effective result. The tool therefore reports cautious evidence such as `potentially_blocked` instead of claiming that a port is certainly open or closed. UFW is treated as a frontend and may appear beside its nftables or iptables backend. See the official [Ubuntu UFW guide](https://documentation.ubuntu.com/server/how-to/security/firewalls/index.html), [firewalld documentation](https://firewalld.org/documentation/man-pages/firewall-cmd.html), [nftables ruleset operations](https://wiki.nftables.org/wiki-nftables/index.php/Operations_at_ruleset_level), and [iptables manual](https://man7.org/linux/man-pages/man8/iptables.8.html).
+
+`doctor nginx` follows an application-specific dependency path: host capacity, service manager plus running-process correlation, bounded service logs, binary discovery, `nginx -t`, expanded active configuration from `nginx -T`, configured logs, IP and Unix listeners, host-firewall correlation for configured TCP ports, a direct virtual-host probe, and the relevant content/security-policy path. It branches its recommendations for TLS failures, connection failures, redirects, 401, 403, 404, and upstream-oriented 502/503/504 responses.
 
 ```bash
 SysAdminToolbox doctor nginx
