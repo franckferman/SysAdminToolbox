@@ -1094,7 +1094,8 @@ class DiagnosticTests(unittest.TestCase):
             "available": True, "ok": False, "returncode": 1, "stdout": "", "stderr": "not found",
             "error": "not found", "elapsed_ms": 1,
         }
-        result = sat.service_diagnostic("nginx")
+        with patch.object(sat.platform, "system", return_value="Linux"):
+            result = sat.service_diagnostic("nginx")
         codes = {item["code"] for item in result["findings"]}
         self.assertEqual(result["status"], "warning")
         self.assertIn("service_manager_process_mismatch", codes)
