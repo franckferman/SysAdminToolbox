@@ -21,6 +21,8 @@ SysAdminToolbox provides network calculations, operational checks, and configura
 - **MAC utilities** - Normalization, generation, address properties, and optional vendor lookup from a locally cached IEEE OUI registry.
 - **Configuration** - Platform-aware VLAN and ACL generators for Cisco, Juniper, and Huawei.
 - **Reference** - VLAN, ACL, firewall, routing, and NAT cheatsheets with optional provenance and explicitly separated legacy material.
+- **AI assistant (optional)** - Ask questions, explain output, or suggest a command through a local Ollama or a cloud provider (Anthropic, OpenAI, DeepSeek, Kimi). Standard library only, opt-in.
+- **Web UI (optional)** - Serve the safe command groups and cheatsheets in a local browser.
 
 ## Installation
 
@@ -96,6 +98,8 @@ Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the compl
 | `doctor` (`diag`, `diagnose`) | `system`, `nginx`, `service`, `disk`, `network`, `firewall` |
 | `vendor` (`v`) | `profiles`, `vlan`, `acl` |
 | `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
+| `ai` | `ask`, `explain`, `suggest` - local Ollama or a cloud provider, opt-in |
+| `web` | Local browser UI for the safe command groups and cheatsheets |
 
 ## Address planning and IPAM checks
 
@@ -351,6 +355,27 @@ SysAdminToolbox cheat vlan legacy_vtp --legacy --show-sources
 ```
 
 Legacy entries are labeled with their status, target platform, replacement, and source. Current generators never emit ISL; the old protocol remains available only as a clearly marked compatibility reference.
+
+## AI assistant (optional)
+
+The `ai` command is opt-in and adds no dependencies - it uses the standard library and only reaches the network when you run it. It prefers a local Ollama (private) and otherwise falls back to the first configured cloud provider.
+
+```bash
+SysAdminToolbox ai ask "what is a /29 useful for"
+SysAdminToolbox ai suggest "split 10.0.0.0/24 into 4 subnets"
+SysAdminToolbox net cert-audit example.com --json | SysAdminToolbox ai explain
+```
+
+Choose a provider with `--provider` (`auto` by default): `ollama`, `anthropic`, `openai`, `deepseek`, or `kimi`, optionally `provider:model`. API keys are read from the environment only and are never stored - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`; local Ollama uses `OLLAMA_HOST`. Before any cloud call the tool prints the provider, model, and a prompt digest and asks for confirmation; pass `--yes` to skip it, or keep everything private with a local Ollama.
+
+## Web UI (optional)
+
+The `web` command serves a small local interface for the safe command groups and cheatsheets. It binds `127.0.0.1` by default, runs each request through the same commands in an isolated subprocess behind a fixed whitelist, and never exposes the network diagnostics, `doctor`, or the `ai` command.
+
+```bash
+SysAdminToolbox web
+SysAdminToolbox web --host 127.0.0.1 --port 8787
+```
 
 ## Output and exit status
 

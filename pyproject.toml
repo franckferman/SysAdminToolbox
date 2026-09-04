@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SysAdminToolbox"
-version = "4.3.0"
+version = "4.4.0"
 description = "Dependency-free network administration CLI for calculations, diagnostics, and configuration helpers."
 authors = [{ name = "Franck Ferman", email = "contact@franckferman.fr" }]
 license = "MIT"
