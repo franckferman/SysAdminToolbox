@@ -98,7 +98,7 @@ Run `SysAdminToolbox --help` or `SysAdminToolbox <command> --help` for the compl
 | `doctor` (`diag`, `diagnose`) | `system`, `nginx`, `service`, `disk`, `network`, `firewall` |
 | `vendor` (`v`) | `profiles`, `vlan`, `acl` |
 | `cheat` (`cs`) | `vlan`, `acl`, `huawei`, `mikrotik`, `firewall`, `routing`, `nat` |
-| `ai` | `ask`, `explain`, `suggest` - local Ollama or a cloud provider, opt-in |
+| `ai` | `ask`, `explain`, `suggest`, `run`, `diagnose`, `agent` - opt-in, local Ollama or a cloud provider |
 | `web` | Local browser UI for the safe command groups and cheatsheets |
 
 ## Address planning and IPAM checks
@@ -364,6 +364,19 @@ The `ai` command is opt-in and adds no dependencies - it uses the standard libra
 SysAdminToolbox ai ask "what is a /29 useful for"
 SysAdminToolbox ai suggest "split 10.0.0.0/24 into 4 subnets"
 SysAdminToolbox net cert-audit example.com --json | SysAdminToolbox ai explain
+```
+
+Beyond question-answering, the AI can drive the tool itself:
+
+- `ai run "<request>"` turns a natural-language request into a single SysAdminToolbox command and runs it (after a confirmation).
+- `ai diagnose <target>` runs a fixed battery of read-only checks (DNS, ping, TLS, HTTP headers, traceroute) and narrates a root-cause assessment.
+- `ai agent "<goal>"` is an autonomous loop: the model calls read-only SysAdminToolbox commands, reads their JSON, and iterates until it can conclude. It runs read-only commands only, prints each one before running it, is bounded by `--max-steps` (default 8), and `--dry-run` prints the plan without executing.
+
+```bash
+SysAdminToolbox ai run "check the TLS certificate of example.com"
+SysAdminToolbox ai diagnose example.com --symptom "site is slow"
+SysAdminToolbox ai agent "why can I not reach example.com on 443"
+SysAdminToolbox ai agent "plan a VLSM scheme for 50, 30 and 10 hosts" --dry-run
 ```
 
 Choose a provider with `--provider` (`auto` by default): `ollama`, `anthropic`, `openai`, `deepseek`, or `kimi`, optionally `provider:model`. API keys are read from the environment only and are never stored - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`; local Ollama uses `OLLAMA_HOST`. Before any cloud call the tool prints the provider, model, and a prompt digest and asks for confirmation; pass `--yes` to skip it, or keep everything private with a local Ollama.

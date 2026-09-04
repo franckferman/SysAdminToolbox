@@ -6869,11 +6869,14 @@ def _setup_parser():
     # -- ai --
     p = sub.add_parser("ai", parents=[shared], help="AI assistant (optional, opt-in)",
                         formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n  ai ask \"what is a /29 useful for\"\n  ai suggest \"split 10.0.0.0/24 into 4 subnets\"\n  SysAdminToolbox net certcheck example.com --json | SysAdminToolbox ai explain\n\nProviders (--provider): auto (default) | ollama | anthropic | openai | deepseek | kimi, optionally provider:model.\nKeys via env: ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / MOONSHOT_API_KEY. Local Ollama: OLLAMA_HOST.\nPrivacy: local ollama is preferred when reachable; cloud sends require a confirmation or --yes.")
-    p.add_argument("op", choices=["ask", "explain", "suggest"], help="AI operation")
+                        epilog="Examples:\n  ai ask \"what is a /29 useful for\"\n  ai suggest \"split 10.0.0.0/24 into 4 subnets\"\n  SysAdminToolbox net certcheck example.com --json | SysAdminToolbox ai explain\n  ai run \"check the TLS cert of example.com\"\n  ai diagnose example.com --symptom \"site is slow\"\n  ai agent \"why can I not reach example.com on 443\"\n\nProviders (--provider): auto (default) | ollama | anthropic | openai | deepseek | kimi, optionally provider:model.\nKeys via env: ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / MOONSHOT_API_KEY. Local Ollama: OLLAMA_HOST.\nPrivacy: local ollama is preferred when reachable; cloud sends require a confirmation or --yes.")
+    p.add_argument("op", choices=["ask", "explain", "suggest", "run", "diagnose", "agent"], help="AI operation")
     p.add_argument("text", nargs="*", help="Question or request (explain also reads piped stdin)")
     p.add_argument("--provider", default="auto", help="auto|ollama|anthropic|openai|deepseek|kimi (or provider:model)")
     p.add_argument("--yes", "-y", action="store_true", help="Skip the cloud-send confirmation")
+    p.add_argument("--symptom", default=None, help="Symptom hint for 'ai diagnose'")
+    p.add_argument("--max-steps", type=int, default=8, dest="max_steps", help="Max steps for 'ai agent' (default 8)")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run", help="For 'ai agent': print the plan without running commands")
 
     # -- web --
     p = sub.add_parser("web", parents=[shared], help="Serve a local web UI (optional)",
@@ -7697,9 +7700,9 @@ def _ai_resolve_provider(spec: str):
         "Unknown AI provider '%s' (use auto|ollama|anthropic|openai|deepseek|kimi)" % provider)
 
 
-def _ai_call_ollama(prompt: str, model: str) -> str:
+def _ai_call_ollama(prompt: str, model: str, system: str = _AI_SYSTEM) -> str:
     payload = json.dumps({
-        "model": model, "system": _AI_SYSTEM, "prompt": prompt,
+        "model": model, "system": system, "prompt": prompt,
         "stream": False, "options": {"temperature": 0.3},
     }).encode()
     req = urllib.request.Request(
@@ -7709,13 +7712,13 @@ def _ai_call_ollama(prompt: str, model: str) -> str:
         return json.loads(resp.read()).get("response", "")
 
 
-def _ai_call_openai_compat(prompt: str, model: str, api_key: str, base_url: str) -> str:
+def _ai_call_openai_compat(prompt: str, model: str, api_key: str, base_url: str, system: str = _AI_SYSTEM) -> str:
     if not api_key:
         raise RuntimeError("Missing API key for this provider (set the matching *_API_KEY env var).")
     payload = json.dumps({
         "model": model, "temperature": 0.3,
         "messages": [
-            {"role": "system", "content": _AI_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
     }).encode()
@@ -7727,11 +7730,11 @@ def _ai_call_openai_compat(prompt: str, model: str, api_key: str, base_url: str)
         return json.loads(resp.read())["choices"][0]["message"]["content"]
 
 
-def _ai_call_anthropic(prompt: str, model: str, api_key: str) -> str:
+def _ai_call_anthropic(prompt: str, model: str, api_key: str, system: str = _AI_SYSTEM) -> str:
     if not api_key:
         raise RuntimeError("Missing ANTHROPIC_API_KEY.")
     payload = json.dumps({
-        "model": model, "max_tokens": 1024, "system": _AI_SYSTEM,
+        "model": model, "max_tokens": 1024, "system": system,
         "messages": [{"role": "user", "content": prompt}],
     }).encode()
     req = urllib.request.Request(
@@ -7746,16 +7749,18 @@ def _ai_call_anthropic(prompt: str, model: str, api_key: str) -> str:
         return json.loads(resp.read())["content"][0]["text"]
 
 
-def ai_complete(prompt: str, spec: str = "auto") -> str:
+def ai_complete(prompt: str, spec: str = "auto", system: str = None) -> str:
     """Run one completion and return the model's text. Raises RuntimeError on failure."""
+    if system is None:
+        system = _AI_SYSTEM
     provider, model = _ai_resolve_provider(spec)
     try:
         if provider == "ollama":
-            return _ai_call_ollama(prompt, model)
+            return _ai_call_ollama(prompt, model, system)
         if provider == "anthropic":
-            return _ai_call_anthropic(prompt, model, os.environ.get("ANTHROPIC_API_KEY", ""))
+            return _ai_call_anthropic(prompt, model, os.environ.get("ANTHROPIC_API_KEY", ""), system)
         env, _default, base_url = _AI_CLOUD[provider]
-        return _ai_call_openai_compat(prompt, model, os.environ.get(env, ""), base_url)
+        return _ai_call_openai_compat(prompt, model, os.environ.get(env, ""), base_url, system)
     except (urllib.error.URLError, OSError) as exc:
         raise RuntimeError("AI request failed (%s): %s" % (provider, exc))
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
@@ -7772,41 +7777,202 @@ def _ai_build_prompt(op: str, text: str) -> str:
     return text  # ask
 
 
+
+# -- agent / run / diagnose: the AI drives SysAdminToolbox's own read-only commands --
+
+# Command groups the AI may run as tools (read-only; ai/web are never exposed).
+_AI_AGENT_TOOLS = {"convert", "subnet", "ipv6", "mac", "net", "doctor", "vendor", "cheat"}
+
+_AI_TOOL_CATALOG = (
+    "- convert: base/address conversions (ipinfo, ipclass, m2c, c2m, ...)\n"
+    "- subnet: subnetting (calc, adv, vlsm, range, contains, exclude, overlap, supernet, audit)\n"
+    "- ipv6: IPv6 utilities (expand, compress, type, subnet, ula)\n"
+    "- mac: MAC utilities (info, format, vendor, generate)\n"
+    "- net: diagnostics (ping, dns, dns-type, dns-compare, certcheck, cert-audit, dns-health,\n"
+    "       headers, traceroute-asn, rdns, whois, portscan)\n"
+    "- doctor: read-only host checks (system, service, disk, network, firewall, nginx)\n"
+    "- vendor: generate vlan/acl config\n"
+    "- cheat: reference cheatsheets\n"
+)
+
+
+def _ai_extract_json(text: str):
+    """Best-effort extraction of a single JSON object from model text."""
+    text = re.sub(r"```(?:json)?", "", text or "").strip()
+    for candidate in (text, (re.search(r"\{.*\}", text, re.DOTALL) or [None]).__getitem__(0)
+                      if re.search(r"\{.*\}", text, re.DOTALL) else None):
+        if not candidate:
+            continue
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
+def _ai_tool_run(group, args):
+    """Run one whitelisted read-only SysAdminToolbox command as a tool. Returns (ok, text)."""
+    group = str(group).strip().lower()
+    if group not in _AI_AGENT_TOOLS:
+        return (False, "tool '%s' is not available" % group)
+    cmd = [sys.executable, os.path.abspath(__file__), group] + [str(a) for a in (args or [])]
+    cmd += ["--json", "--no-color"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+    except subprocess.TimeoutExpired:
+        return (False, "command timed out")
+    out = (proc.stdout or proc.stderr or "").strip()
+    return (proc.returncode == 0, out[:2000])
+
+
+def _ai_confirm_cloud(provider, model, digest, yes, extra=""):
+    """Return True to proceed. Cloud providers warn + confirm (or refuse non-interactively)."""
+    if provider == "ollama" or yes:
+        return True
+    print("[ai] This uses cloud provider '%s' (model %s).%s Prompt digest %s"
+          % (provider, model, extra, digest), file=sys.stderr)
+    if sys.stdin.isatty():
+        try:
+            return input("[ai] Continue? [y/N] ").strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
+    raise RuntimeError(
+        "Refusing to use cloud provider '%s' non-interactively; pass --yes, or use a local ollama." % provider)
+
+
+_AI_AGENT_SYSTEM = (
+    "You are a read-only network troubleshooting agent driving a CLI called SysAdminToolbox. "
+    "Solve the user's goal by calling its commands as tools and reading their JSON output.\n"
+    "Available tool groups and operations:\n" + _AI_TOOL_CATALOG +
+    "\nProtocol: reply with ONE JSON object and nothing else.\n"
+    '  to run a command:  {"tool": "<group>", "args": ["<op>", "<arg>", ...], "why": "<short reason>"}\n'
+    '  when finished:     {"final": "<diagnosis and concrete next steps>"}\n'
+    "Prefer single-target diagnostics, avoid network-wide sweeps, and finish in a few steps."
+)
+
+
+def _ai_agent(goal, spec, max_steps):
+    """Autonomous tool-use loop: the model runs read-only commands until it can conclude."""
+    max_steps = max(1, min(int(max_steps or 8), 15))
+    transcript = "GOAL: " + goal + "\n"
+    for step in range(1, max_steps + 1):
+        raw = ai_complete(transcript + "\nWhat is your next JSON action?", spec, system=_AI_AGENT_SYSTEM)
+        action = _ai_extract_json(raw)
+        if action.get("final"):
+            print(action["final"] if isinstance(action["final"], str) else json.dumps(action["final"]))
+            return
+        group = action.get("tool", "")
+        args = action.get("args", []) or []
+        if not group:
+            print("[agent] no actionable step returned; stopping.", file=sys.stderr)
+            print(raw.strip())
+            return
+        line = (str(group) + " " + " ".join(str(a) for a in args)).strip()
+        print("[agent] step %d: SysAdminToolbox %s  (%s)"
+              % (step, line, action.get("why", "")), file=sys.stderr)
+        ok, out = _ai_tool_run(group, args)
+        transcript += "\nSTEP %d: `%s` -> %s\n%s\n" % (step, line, "ok" if ok else "ERROR", out)
+    raw = ai_complete(transcript + "\nStep budget reached. Reply now with {\"final\": ...}.",
+                      spec, system=_AI_AGENT_SYSTEM)
+    action = _ai_extract_json(raw)
+    print(action.get("final") or raw.strip())
+
+
+def _ai_agent_plan(goal, spec):
+    """--dry-run: print the ordered plan the agent would run, without executing anything."""
+    system = ("You are a network troubleshooting planner for SysAdminToolbox (read-only). "
+              "Available tools:\n" + _AI_TOOL_CATALOG +
+              "\nGiven the goal, output an ordered, numbered plan of SysAdminToolbox commands you "
+              "would run, each with a one-line reason. Do not execute anything.")
+    print(ai_complete("GOAL: " + goal, spec, system=system).strip())
+
+
+def _ai_run(nl, spec, yes):
+    """Translate a natural-language request into one SysAdminToolbox command and run it."""
+    system = ("Translate the request into a single SysAdminToolbox command line. "
+              "Output ONLY the command, without the 'SysAdminToolbox' prefix and without prose. "
+              "Allowed groups: convert, subnet, ipv6, mac, net, doctor, vendor, cheat.")
+    raw = ai_complete("Request: " + nl, spec, system=system).strip()
+    line = re.sub(r"```", "", raw).strip().splitlines()[0].strip() if raw else ""
+    line = re.sub(r"^\$?\s*SysAdminToolbox\s+", "", line).strip()
+    if not line:
+        raise RuntimeError("The model did not return a command.")
+    try:
+        parts = shlex.split(line)
+    except ValueError:
+        parts = line.split()
+    print("[ai] proposed: SysAdminToolbox " + line, file=sys.stderr)
+    if not yes and sys.stdin.isatty():
+        try:
+            if input("[ai] Run it? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("[ai] Not run.", file=sys.stderr)
+                return
+        except (EOFError, KeyboardInterrupt):
+            return
+    ok, out = _ai_tool_run(parts[0], parts[1:]) if parts else (False, "empty command")
+    print(out)
+
+
+def _ai_diagnose(target, symptom, spec):
+    """Run a fixed battery of read-only checks on a target, then narrate the result."""
+    checks = [
+        ("net", ["dns", target]),
+        ("net", ["ping", target]),
+        ("net", ["certcheck", target]),
+        ("net", ["headers", "https://" + target]),
+        ("net", ["traceroute-asn", target]),
+    ]
+    collected = []
+    for group, args in checks:
+        line = group + " " + " ".join(args)
+        print("[diagnose] SysAdminToolbox " + line, file=sys.stderr)
+        ok, out = _ai_tool_run(group, args)
+        collected.append("### %s (%s)\n%s" % (line, "ok" if ok else "error", out))
+    prompt = ("You are a network diagnostician. Below are read-only SysAdminToolbox results for '"
+              + target + "'"
+              + ((" (reported symptom: " + symptom + ")") if symptom else "")
+              + ". Give a concise root-cause assessment and concrete next steps.\n\n"
+              + "\n\n".join(collected))
+    print(ai_complete(prompt, spec).strip())
+
+
 def _dispatch_ai(args):
-    if args.op == "explain" and not sys.stdin.isatty():
+    op = args.op
+    yes = getattr(args, "yes", False)
+    if op == "explain" and not sys.stdin.isatty():
         text = sys.stdin.read().strip()
     else:
         text = " ".join(args.text).strip()
     if not text:
-        extra = " (or pipe output into 'ai explain')" if args.op == "explain" else ""
-        raise ValueError("Nothing to send. Usage: ai %s \"<text>\"%s" % (args.op, extra))
+        if op == "diagnose":
+            raise ValueError("Usage: ai diagnose <target> [--symptom ...]")
+        extra = " (or pipe output into 'ai explain')" if op == "explain" else ""
+        raise ValueError("Nothing to send. Usage: ai %s \"<text>\"%s" % (op, extra))
 
-    prompt = _ai_build_prompt(args.op, text)
     provider, model = _ai_resolve_provider(args.provider)
+    extra = " Command outputs will be sent to it." if op in ("agent", "diagnose") else ""
+    if not _ai_confirm_cloud(provider, model, _ai_prompt_digest(text), yes, extra):
+        print("[ai] Aborted.", file=sys.stderr)
+        return
 
-    if provider != "ollama" and not args.yes:
-        digest = _ai_prompt_digest(prompt)
-        print("[ai] This sends your prompt to cloud provider '%s' (model %s). Digest %s"
-              % (provider, model, digest), file=sys.stderr)
-        if sys.stdin.isatty():
-            try:
-                if input("[ai] Continue? [y/N] ").strip().lower() not in ("y", "yes"):
-                    print("[ai] Aborted.", file=sys.stderr)
-                    return
-            except (EOFError, KeyboardInterrupt):
-                print("[ai] Aborted.", file=sys.stderr)
-                return
+    if op == "agent":
+        if getattr(args, "dry_run", False):
+            _ai_agent_plan(text, args.provider)
         else:
-            raise RuntimeError(
-                "Refusing to send to cloud provider '%s' non-interactively; pass --yes to confirm, "
-                "or run a local ollama (private)." % provider)
-
-    answer = ai_complete(prompt, args.provider)
-    if is_json_mode():
-        output({"provider": provider, "model": model,
-                "prompt_digest": _ai_prompt_digest(prompt), "answer": answer}, label="ai")
-    else:
-        print(answer.strip())
+            _ai_agent(text, args.provider, getattr(args, "max_steps", 8))
+    elif op == "run":
+        _ai_run(text, args.provider, yes)
+    elif op == "diagnose":
+        _ai_diagnose(text.split()[0], getattr(args, "symptom", None), args.provider)
+    else:  # ask / explain / suggest
+        answer = ai_complete(_ai_build_prompt(op, text), args.provider)
+        if is_json_mode():
+            output({"provider": provider, "model": model,
+                    "prompt_digest": _ai_prompt_digest(text), "answer": answer}, label="ai")
+        else:
+            print(answer.strip())
 
 
 

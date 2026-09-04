@@ -322,9 +322,9 @@ SysAdminToolbox --help"><span class="p">$</span> python3 -m pip install https://
     { name:"cheat", aka:"cs", desc:"Built-in cheatsheets for VLAN, ACL, firewall, routing and NAT.",
       ops:["vlan","acl","firewall","routing","nat","huawei","mikrotik"],
       ex:["cheat firewall","cheat routing ospf"] },
-    { name:"ai", aka:"optional", desc:"AI assistant - ask, explain output, or suggest a command via a local Ollama or a cloud provider (Anthropic, OpenAI, DeepSeek, Kimi). Standard library only, opt-in.",
-      ops:["ask","explain","suggest"],
-      ex:["ai ask what is a /29 useful for","net cert-audit example.com --json | ai explain"] },
+    { name:"ai", aka:"optional", desc:"AI assistant. Ask/explain/suggest, run a natural-language request, diagnose a target, or an autonomous agent that drives read-only SysAdminToolbox commands to solve a problem. Local Ollama or a cloud provider. Standard library only, opt-in.",
+      ops:["ask","explain","suggest","run","diagnose","agent"],
+      ex:["ai agent why can I not reach example.com on 443","ai diagnose example.com","ai run check the TLS cert of example.com"] },
     { name:"web", aka:"optional", desc:"Local browser UI on 127.0.0.1 for the safe command groups, served by the standard-library http.server.",
       ops:["--host","--port"],
       ex:["web","web --port 8787"] }
