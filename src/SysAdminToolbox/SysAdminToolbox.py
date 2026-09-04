@@ -6,7 +6,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
-Version  : 4.3.0
+Version  : 4.4.0
 License  : MIT
 
 Repository:
@@ -19,6 +19,7 @@ import argparse
 import csv
 import hashlib
 import http.client
+import http.server
 import ipaddress
 import itertools
 import json
@@ -44,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, cast
 
-__version__ = "4.3.0"
+__version__ = "4.4.0"
 
 MAX_SUBNET_DETAILS = 256
 MAX_NETWORK_HOSTS = 4096
@@ -6865,6 +6866,23 @@ def _setup_parser():
     p.add_argument("--platform", dest="platform_name", help="Filter references by platform profile")
     p.add_argument("--show-sources", action="store_true", help="Show status, platform, replacement, and source metadata")
 
+    # -- ai --
+    p = sub.add_parser("ai", parents=[shared], help="AI assistant (optional, opt-in)",
+                        formatter_class=argparse.RawTextHelpFormatter,
+                        epilog="Examples:\n  ai ask \"what is a /29 useful for\"\n  ai suggest \"split 10.0.0.0/24 into 4 subnets\"\n  SysAdminToolbox net certcheck example.com --json | SysAdminToolbox ai explain\n\nProviders (--provider): auto (default) | ollama | anthropic | openai | deepseek | kimi, optionally provider:model.\nKeys via env: ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / MOONSHOT_API_KEY. Local Ollama: OLLAMA_HOST.\nPrivacy: local ollama is preferred when reachable; cloud sends require a confirmation or --yes.")
+    p.add_argument("op", choices=["ask", "explain", "suggest"], help="AI operation")
+    p.add_argument("text", nargs="*", help="Question or request (explain also reads piped stdin)")
+    p.add_argument("--provider", default="auto", help="auto|ollama|anthropic|openai|deepseek|kimi (or provider:model)")
+    p.add_argument("--yes", "-y", action="store_true", help="Skip the cloud-send confirmation")
+
+    # -- web --
+    p = sub.add_parser("web", parents=[shared], help="Serve a local web UI (optional)",
+                        formatter_class=argparse.RawTextHelpFormatter,
+                        epilog="Examples:\n  web\n  web --host 127.0.0.1 --port 8787\n\nServes the safe command groups (convert, subnet, ipv6, mac, vendor, cheat) and\ncheatsheets in your browser. Binds 127.0.0.1 by default; net and ai are not exposed.")
+    p.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8787, help="Port (default: 8787)")
+
+
     return parser
 
 
@@ -7608,6 +7626,339 @@ def _dispatch_cheat(args):
     output(content, label="cheatsheet")
 
 
+# ---------------------------------------------------------------------------
+#  AI assistant (optional, opt-in) - standard library only (urllib).
+#  No network call happens unless the `ai` command is used, so the tool stays
+#  dependency-free and fully offline by default.
+# ---------------------------------------------------------------------------
+
+_AI_SYSTEM = (
+    "You are a concise network engineering assistant inside a CLI named "
+    "SysAdminToolbox. Answer accurately and briefly for a professional sysadmin. "
+    "When a SysAdminToolbox command would help, name it (groups: convert, subnet, "
+    "ipv6, mac, net, vendor, cheat)."
+)
+
+# provider -> (env var with the API key, default model, base url; None base url = anthropic)
+_AI_CLOUD = {
+    "anthropic": ("ANTHROPIC_API_KEY", "claude-haiku-4-5-20251001", None),
+    "openai":    ("OPENAI_API_KEY",    "gpt-4o-mini",              "https://api.openai.com/v1"),
+    "deepseek":  ("DEEPSEEK_API_KEY",  "deepseek-chat",            "https://api.deepseek.com/v1"),
+    "kimi":      ("MOONSHOT_API_KEY",  "moonshot-v1-8k",           "https://api.moonshot.cn/v1"),
+}
+_AI_OLLAMA_DEFAULT = "llama3.2"
+
+
+def _ai_timeout() -> int:
+    try:
+        return int(os.environ.get("LLM_TIMEOUT", "60"))
+    except ValueError:
+        return 60
+
+
+def _ai_prompt_digest(prompt: str) -> str:
+    """Short hash of the prompt for transparency/logging - never the prompt itself."""
+    return "sha256:" + hashlib.sha256((prompt or "").encode("utf-8", "ignore")).hexdigest()[:12]
+
+
+def _ai_ollama_host() -> str:
+    return os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+
+
+def _ai_ollama_reachable() -> bool:
+    try:
+        req = urllib.request.Request(_ai_ollama_host() + "/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def _ai_resolve_provider(spec: str):
+    """Resolve a provider spec to (provider, model).
+
+    'auto' (default) picks a reachable local Ollama, else the first cloud provider
+    whose API key is set. Otherwise 'provider' or 'provider:model'.
+    """
+    spec = (spec or "auto").strip().lower()
+    if spec in ("", "auto"):
+        if _ai_ollama_reachable():
+            return ("ollama", _AI_OLLAMA_DEFAULT)
+        for name, (env, default, _url) in _AI_CLOUD.items():
+            if os.environ.get(env):
+                return (name, default)
+        return ("ollama", _AI_OLLAMA_DEFAULT)
+    provider, _, model = spec.partition(":")
+    if provider == "ollama":
+        return ("ollama", model or _AI_OLLAMA_DEFAULT)
+    if provider in _AI_CLOUD:
+        return (provider, model or _AI_CLOUD[provider][1])
+    raise ValueError(
+        "Unknown AI provider '%s' (use auto|ollama|anthropic|openai|deepseek|kimi)" % provider)
+
+
+def _ai_call_ollama(prompt: str, model: str) -> str:
+    payload = json.dumps({
+        "model": model, "system": _AI_SYSTEM, "prompt": prompt,
+        "stream": False, "options": {"temperature": 0.3},
+    }).encode()
+    req = urllib.request.Request(
+        _ai_ollama_host() + "/api/generate", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read()).get("response", "")
+
+
+def _ai_call_openai_compat(prompt: str, model: str, api_key: str, base_url: str) -> str:
+    if not api_key:
+        raise RuntimeError("Missing API key for this provider (set the matching *_API_KEY env var).")
+    payload = json.dumps({
+        "model": model, "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": _AI_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode()
+    req = urllib.request.Request(
+        base_url.rstrip("/") + "/chat/completions", data=payload,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + api_key},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read())["choices"][0]["message"]["content"]
+
+
+def _ai_call_anthropic(prompt: str, model: str, api_key: str) -> str:
+    if not api_key:
+        raise RuntimeError("Missing ANTHROPIC_API_KEY.")
+    payload = json.dumps({
+        "model": model, "max_tokens": 1024, "system": _AI_SYSTEM,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST")
+    with urllib.request.urlopen(req, timeout=_ai_timeout()) as resp:
+        return json.loads(resp.read())["content"][0]["text"]
+
+
+def ai_complete(prompt: str, spec: str = "auto") -> str:
+    """Run one completion and return the model's text. Raises RuntimeError on failure."""
+    provider, model = _ai_resolve_provider(spec)
+    try:
+        if provider == "ollama":
+            return _ai_call_ollama(prompt, model)
+        if provider == "anthropic":
+            return _ai_call_anthropic(prompt, model, os.environ.get("ANTHROPIC_API_KEY", ""))
+        env, _default, base_url = _AI_CLOUD[provider]
+        return _ai_call_openai_compat(prompt, model, os.environ.get(env, ""), base_url)
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("AI request failed (%s): %s" % (provider, exc))
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Unexpected AI response (%s): %s" % (provider, exc))
+
+
+def _ai_build_prompt(op: str, text: str) -> str:
+    if op == "explain":
+        return ("Explain the following network diagnostic or CLI output for a sysadmin, "
+                "concisely and in plain language:\n\n" + text)
+    if op == "suggest":
+        return ("Give the single best SysAdminToolbox command line for this request. "
+                "Output only the command, no prose.\nRequest: " + text)
+    return text  # ask
+
+
+def _dispatch_ai(args):
+    if args.op == "explain" and not sys.stdin.isatty():
+        text = sys.stdin.read().strip()
+    else:
+        text = " ".join(args.text).strip()
+    if not text:
+        extra = " (or pipe output into 'ai explain')" if args.op == "explain" else ""
+        raise ValueError("Nothing to send. Usage: ai %s \"<text>\"%s" % (args.op, extra))
+
+    prompt = _ai_build_prompt(args.op, text)
+    provider, model = _ai_resolve_provider(args.provider)
+
+    if provider != "ollama" and not args.yes:
+        digest = _ai_prompt_digest(prompt)
+        print("[ai] This sends your prompt to cloud provider '%s' (model %s). Digest %s"
+              % (provider, model, digest), file=sys.stderr)
+        if sys.stdin.isatty():
+            try:
+                if input("[ai] Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+                    print("[ai] Aborted.", file=sys.stderr)
+                    return
+            except (EOFError, KeyboardInterrupt):
+                print("[ai] Aborted.", file=sys.stderr)
+                return
+        else:
+            raise RuntimeError(
+                "Refusing to send to cloud provider '%s' non-interactively; pass --yes to confirm, "
+                "or run a local ollama (private)." % provider)
+
+    answer = ai_complete(prompt, args.provider)
+    if is_json_mode():
+        output({"provider": provider, "model": model,
+                "prompt_digest": _ai_prompt_digest(prompt), "answer": answer}, label="ai")
+    else:
+        print(answer.strip())
+
+
+
+# ---------------------------------------------------------------------------
+#  Web mode (optional) - standard library http.server only.
+#  Serves a local UI that runs the SAFE command groups and browses cheatsheets.
+#  Network diagnostics (net) and the ai command are intentionally NOT exposed,
+#  and the server binds 127.0.0.1 by default.
+# ---------------------------------------------------------------------------
+
+_WEB_SAFE = {
+    "convert", "conv", "c", "subnet", "sub", "s", "ipv6", "v6",
+    "mac", "m", "vendor", "v", "cheat", "cs",
+}
+
+_WEB_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SysAdminToolbox</title>
+<style>
+:root{color-scheme:light;--bg:#f9f9f7;--card:#fcfcfb;--ink:#0b0b0b;--sub:#52514e;--mut:#898781;--bd:rgba(11,11,11,.12);--ac:#2a78d6;--code:#f4f3f0;--codeink:#1f2933;--bad:#b3261e;}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#0d0d0d;--card:#1a1a19;--ink:#fff;--sub:#c3c2b7;--mut:#898781;--bd:rgba(255,255,255,.12);--ac:#3987e5;--code:#111110;--codeink:#d7d7cf;--bad:#f0857c;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+.wrap{max-width:900px;margin:0 auto;padding:24px 18px 60px}
+h1{font-size:1.25rem;margin:0 0 2px;display:flex;align-items:center;gap:9px}
+.logo{width:28px;height:28px;border-radius:7px;background:var(--ac);color:#fff;display:grid;place-items:center;font-family:ui-monospace,monospace;font-weight:700}
+.sub{color:var(--mut);font-size:.85rem;margin:0 0 18px}
+.runbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+#line{flex:1 1 320px;min-width:0;font:inherit;font-family:ui-monospace,monospace;color:var(--ink);background:var(--card);border:1px solid var(--bd);border-radius:9px;padding:10px 12px}
+.chk{color:var(--sub);font-size:.85rem;display:flex;align-items:center;gap:5px}
+button{cursor:pointer;font:inherit;border:1px solid var(--ac);background:var(--ac);color:#fff;border-radius:9px;padding:10px 16px}
+button.ghost{background:var(--card);color:var(--sub);border-color:var(--bd);padding:5px 11px;font-size:.82rem;border-radius:999px}
+button.ghost:hover{color:var(--ink)}
+.out{background:var(--code);color:var(--codeink);border:1px solid var(--bd);border-radius:10px;padding:13px 15px;overflow-x:auto;max-width:100%;min-height:80px;white-space:pre;font-family:ui-monospace,monospace;font-size:.85rem;margin:0 0 20px}
+.out.err{color:var(--bad)}
+.grp{margin:16px 0 6px;font-size:.8rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+a{color:var(--ac)}
+footer{margin-top:26px;color:var(--mut);font-size:.8rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="logo">&gt;_</span> SysAdminToolbox</h1>
+  <p class="sub">Local web UI - safe command groups only (convert, subnet, ipv6, mac, vendor, cheat).</p>
+  <div class="runbar">
+    <input id="line" placeholder="e.g. subnet calc 192.168.0.0/24" autocomplete="off" spellcheck="false">
+    <label class="chk"><input type="checkbox" id="json"> JSON</label>
+    <button id="run" type="button">Run</button>
+  </div>
+  <pre class="out" id="out">Ready. Pick an example or type a command.</pre>
+  <div class="grp">Examples</div>
+  <div class="chips" id="examples"></div>
+  <div class="grp">Cheatsheets</div>
+  <div class="chips" id="cheats"></div>
+  <footer>SysAdminToolbox web mode - <a href="https://github.com/franckferman/SysAdminToolbox" target="_blank" rel="noopener">source</a></footer>
+</div>
+<script>
+var EX=["convert ipinfo 192.168.1.42/24","subnet calc 192.168.0.0/24","subnet vlsm 192.168.1.0/24 50 30 10","ipv6 expand ::1","mac info AA:BB:CC:DD:EE:FF","vendor vlan cisco 10 Engineering"];
+var CS=["vlan","acl","firewall","routing","nat","huawei","mikrotik"];
+var line=document.getElementById("line"),out=document.getElementById("out"),jsonBox=document.getElementById("json");
+function chip(text){var b=document.createElement("button");b.className="ghost";b.type="button";b.textContent=text;return b;}
+EX.forEach(function(e){var b=chip(e);b.addEventListener("click",function(){line.value=e;run();});document.getElementById("examples").appendChild(b);});
+CS.forEach(function(t){var b=chip("cheat "+t);b.addEventListener("click",function(){line.value="cheat "+t;jsonBox.checked=false;run();});document.getElementById("cheats").appendChild(b);});
+function run(){
+  var v=line.value.trim();if(!v){return;}
+  out.className="out";out.textContent="Running...";
+  fetch("/api/run?json="+(jsonBox.checked?1:0)+"&line="+encodeURIComponent(v))
+    .then(function(r){return r.json();})
+    .then(function(d){out.className="out"+(d.ok?"":" err");out.textContent=(d.output||"").replace(/\s+$/,"")||"(no output)";})
+    .catch(function(e){out.className="out err";out.textContent="Request failed: "+e;});
+}
+document.getElementById("run").addEventListener("click",run);
+line.addEventListener("keydown",function(e){if(e.key==="Enter"){run();}});
+</script>
+</body>
+</html>
+"""
+
+
+def _web_run(line: str, as_json: bool):
+    """Run one whitelisted command line in an isolated subprocess. Returns (ok, text)."""
+    try:
+        parts = shlex.split(line)
+    except ValueError as exc:
+        return (False, "Parse error: " + str(exc))
+    if not parts:
+        return (False, "Empty command.")
+    if parts[0].lower() not in _WEB_SAFE:
+        return (False, "Command '%s' is not available in web mode. "
+                       "Allowed: convert, subnet, ipv6, mac, vendor, cheat." % parts[0])
+    cmd = [sys.executable, os.path.abspath(__file__)] + parts + ["--no-color"]
+    if as_json:
+        cmd.append("--json")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return (False, "Command timed out.")
+    if proc.returncode != 0:
+        return (False, (proc.stderr or proc.stdout or "Error").strip())
+    return (True, proc.stdout)
+
+
+def _make_web_handler():
+    class _WebHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):  # keep the console quiet
+            return
+
+        def _send(self, code, body, ctype="application/json; charset=utf-8"):
+            data = body.encode("utf-8") if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path in ("/", "/index.html"):
+                self._send(200, _WEB_HTML, "text/html; charset=utf-8")
+                return
+            if parsed.path == "/api/run":
+                qs = urllib.parse.parse_qs(parsed.query)
+                line = (qs.get("line", [""])[0]).strip()
+                as_json = (qs.get("json", ["0"])[0]) not in ("0", "false", "")
+                ok, out = _web_run(line, as_json)
+                self._send(200 if ok else 400, json.dumps({"ok": ok, "output": out}))
+                return
+            self._send(404, json.dumps({"ok": False, "output": "Not found"}))
+
+    return _WebHandler
+
+
+def _dispatch_web(args):
+    try:
+        httpd = http.server.HTTPServer((args.host, args.port), _make_web_handler())
+    except OSError as exc:
+        raise RuntimeError("Cannot bind %s:%d (%s)" % (args.host, args.port, exc))
+    print("SysAdminToolbox web UI on http://%s:%d/" % (args.host, args.port), file=sys.stderr)
+    print("Safe commands only (convert, subnet, ipv6, mac, vendor, cheat). Ctrl+C to stop.",
+          file=sys.stderr)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.", file=sys.stderr)
+    finally:
+        httpd.server_close()
+
+
 DISPATCH = {
     "convert": _dispatch_convert, "conv": _dispatch_convert, "c": _dispatch_convert,
     "subnet": _dispatch_subnet, "sub": _dispatch_subnet, "s": _dispatch_subnet,
@@ -7617,6 +7968,8 @@ DISPATCH = {
     "doctor": _dispatch_doctor, "diag": _dispatch_doctor, "diagnose": _dispatch_doctor,
     "vendor": _dispatch_vendor, "v": _dispatch_vendor,
     "cheat": _dispatch_cheat, "cs": _dispatch_cheat,
+    "ai": _dispatch_ai,
+    "web": _dispatch_web,
 }
 
 
