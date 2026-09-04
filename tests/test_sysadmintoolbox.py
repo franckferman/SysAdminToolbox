@@ -1779,10 +1779,11 @@ class MetadataTests(unittest.TestCase):
         source_text = (SRC / "SysAdminToolbox" / "SysAdminToolbox.py").read_text(encoding="utf-8")
         self.assertIn(f'version = "{sat.__version__}"', pyproject)
         self.assertIn(f'__version__ = "{sat.__version__}"', source_text)
-        self.assertIn("MIT License", license_text)
-        self.assertIn("MIT License", readme)
+        self.assertIn("GNU AFFERO GENERAL PUBLIC LICENSE", license_text)
+        self.assertIn("GNU Affero General Public License", readme)
         combined = pyproject + readme + source_text
-        self.assertNotIn("AGPL", combined)
+        self.assertIn("AGPL-3.0", pyproject)
+        self.assertNotIn("MIT License", combined)
         self.assertNotIn("GPLv3", combined)
         source_files = sorted(
             path.name for path in (SRC / "SysAdminToolbox").glob("*.py")

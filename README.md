@@ -407,7 +407,7 @@ CI installs the package and runs the suite on Python 3.9 through 3.14 on Linux, 
 
 ## License
 
-SysAdminToolbox is available under the [MIT License](LICENSE).
+This project is licensed under the GNU Affero General Public License, Version 3.0. For more details, please refer to the LICENSE file in the repository: [Read the license on GitHub](https://github.com/franckferman/SysAdminToolbox/blob/stable/LICENSE).
 
 ## Contact
 

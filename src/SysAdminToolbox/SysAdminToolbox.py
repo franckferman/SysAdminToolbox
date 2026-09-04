@@ -7,7 +7,7 @@ Network administration calculations, diagnostics, and configuration helpers.
 Author   : Franck FERMAN (@franckferman)
 Created  : 2024-08-24
 Version  : 4.4.0
-License  : MIT
+License  : AGPL-3.0-or-later
 
 Repository:
     https://github.com/franckferman/SysAdminToolbox
