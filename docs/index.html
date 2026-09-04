@@ -253,8 +253,8 @@ SysAdminToolbox --help"><span class="p">$</span> python3 -m pip install https://
     <div class="wrap">
       <div class="sec-head">
         <span class="eyebrow">Reference</span>
-        <h2>Eight command groups</h2>
-        <p>Every subcommand accepts <span class="mono">--json</span> and <span class="mono">--no-color</span>. Run <span class="mono">-i</span> for the interactive REPL, or <span class="mono">&lt;command&gt; --help</span> for the full built-in reference.</p>
+        <h2>Ten command groups</h2>
+        <p>Every subcommand accepts <span class="mono">--json</span> and <span class="mono">--no-color</span>; run <span class="mono">-i</span> for the interactive REPL. Two are optional and opt-in: <span class="mono">ai</span>, a standard-library multi-provider assistant, and <span class="mono">web</span>, a local browser UI.</p>
       </div>
       <input class="filter mono" id="cmd-filter" type="search" placeholder="filter: subnet, dns, doctor, mac ..." aria-label="Filter commands">
       <div class="cmd-grid" id="cmd-grid"></div>
@@ -321,7 +321,13 @@ SysAdminToolbox --help"><span class="p">$</span> python3 -m pip install https://
       ex:["vendor vlan cisco 10 Engineering","vendor acl cisco BLOCK deny tcp 10.0.0.0/8 any"] },
     { name:"cheat", aka:"cs", desc:"Built-in cheatsheets for VLAN, ACL, firewall, routing and NAT.",
       ops:["vlan","acl","firewall","routing","nat","huawei","mikrotik"],
-      ex:["cheat firewall","cheat routing ospf"] }
+      ex:["cheat firewall","cheat routing ospf"] },
+    { name:"ai", aka:"optional", desc:"AI assistant - ask, explain output, or suggest a command via a local Ollama or a cloud provider (Anthropic, OpenAI, DeepSeek, Kimi). Standard library only, opt-in.",
+      ops:["ask","explain","suggest"],
+      ex:["ai ask what is a /29 useful for","net cert-audit example.com --json | ai explain"] },
+    { name:"web", aka:"optional", desc:"Local browser UI on 127.0.0.1 for the safe command groups, served by the standard-library http.server.",
+      ops:["--host","--port"],
+      ex:["web","web --port 8787"] }
   ];
   var grid = document.getElementById("cmd-grid");
   function card(c){
