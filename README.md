@@ -379,7 +379,7 @@ SysAdminToolbox ai agent "why can I not reach example.com on 443"
 SysAdminToolbox ai agent "plan a VLSM scheme for 50, 30 and 10 hosts" --dry-run
 ```
 
-Choose a provider with `--provider` (`auto` by default): `ollama`, `anthropic`, `openai`, `deepseek`, or `kimi`, optionally `provider:model`. API keys are read from the environment only and are never stored - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`; local Ollama uses `OLLAMA_HOST`. Before any cloud call the tool prints the provider, model, and a prompt digest and asks for confirmation; pass `--yes` to skip it, or keep everything private with a local Ollama.
+Choose a provider with `--provider` (`auto` by default): `ollama`, `anthropic`, `openai`, `deepseek`, or `kimi`, optionally `provider:model`. API keys are read from the environment only and are never stored - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`; local Ollama uses `OLLAMA_HOST`, and `LLM_TIMEOUT` sets the per-request timeout in seconds (raise it for slow local models). Before any cloud call the tool prints the provider, model, and a prompt digest and asks for confirmation; pass `--yes` to skip it, or keep everything private with a local Ollama.
 
 ## Web UI (optional)
 
@@ -416,7 +416,7 @@ python3 -m compileall -q src tests
 python3 -W error -m unittest discover -s tests -v
 ```
 
-CI installs the package and runs the suite on Python 3.9 through 3.14 on Linux, with additional Python 3.14 jobs on Windows and macOS.
+CI installs the package and runs the suite on Python 3.9 through 3.14 on Linux, with additional Python 3.14 jobs on Windows and macOS. Two further workflows run on every source change: a flake8 correctness lint that flags unused imports, undefined names, and syntax errors, and a Bandit security scan.
 
 ## License
 
