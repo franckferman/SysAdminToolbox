@@ -125,5 +125,18 @@ class RunAndDiagnoseTests(unittest.TestCase):
         self.assertGreaterEqual(tr.call_count, 4)
 
 
+
+class PromptReferenceTests(unittest.TestCase):
+    def test_suggest_prompt_includes_syntax_reference(self):
+        prompt = sat._ai_build_prompt("suggest", "split a /24 into four")
+        self.assertIn("subnet calc", prompt)
+        self.assertIn("split a /24 into four", prompt)
+
+    def test_reference_lists_real_commands(self):
+        ref = sat._AI_CMD_REFERENCE
+        for token in ("subnet calc", "subnet vlsm", "certcheck", "ipclass"):
+            self.assertIn(token, ref)
+
+
 if __name__ == "__main__":
     unittest.main()
