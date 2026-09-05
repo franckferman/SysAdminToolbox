@@ -178,6 +178,27 @@ class RunAndDiagnoseTests(unittest.TestCase):
         self.assertEqual(out, "assessment text")
         self.assertGreaterEqual(tr.call_count, 4)
 
+    def test_run_json_report(self):
+        with patch.object(sat, "ai_complete", return_value="subnet calc 10.0.0.0/24"), \
+                patch.object(sat, "_ai_tool_run", return_value=(True, '{"hosts":254}')):
+            out = _cap(sat._ai_run, "split it", "ollama", True, True)
+        report = json.loads(out)
+        self.assertEqual(report["command"], "subnet calc 10.0.0.0/24")
+        self.assertTrue(report["ran"])
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["output"], {"hosts": 254})
+
+    def test_diagnose_json_report(self):
+        with patch.object(sat, "_ai_tool_run", return_value=(True, '{"status":"ok"}')), \
+                patch.object(sat, "ai_complete", return_value="assessment text"):
+            out = _cap(sat._ai_diagnose, "example.com", "slow", "ollama", True)
+        report = json.loads(out)
+        self.assertEqual(report["target"], "example.com")
+        self.assertEqual(report["symptom"], "slow")
+        self.assertEqual(report["assessment"], "assessment text")
+        self.assertGreaterEqual(len(report["checks"]), 4)
+        self.assertEqual(report["checks"][0]["output"], {"status": "ok"})
+
 
 
 class PromptReferenceTests(unittest.TestCase):

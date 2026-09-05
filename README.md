@@ -368,8 +368,8 @@ SysAdminToolbox net cert-audit example.com --json | SysAdminToolbox ai explain
 
 Beyond question-answering, the AI can drive the tool itself:
 
-- `ai run "<request>"` turns a natural-language request into a single SysAdminToolbox command and runs it (after a confirmation).
-- `ai diagnose <target>` runs a fixed battery of read-only checks (DNS, ping, TLS, HTTP headers, traceroute) and narrates a root-cause assessment.
+- `ai run "<request>"` turns a natural-language request into a single SysAdminToolbox command and runs it (after a confirmation). Pass `--json` for a structured `{command, ran, ok, output}` result.
+- `ai diagnose <target>` runs a fixed battery of read-only checks (DNS, ping, TLS, HTTP headers, traceroute) and narrates a root-cause assessment. Pass `--json` for a structured report of every check plus the assessment.
 - `ai agent "<goal>"` is an autonomous loop: the model calls read-only SysAdminToolbox commands, reads their JSON, and iterates until it can conclude. It runs read-only commands only, prints each one before running it, is bounded by `--max-steps` (default 8), and `--dry-run` prints the plan without executing. Add `--json` for a machine-readable report of the goal, each step's command and output, and the final conclusion.
 
 ```bash
