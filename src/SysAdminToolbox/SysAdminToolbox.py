@@ -7933,7 +7933,7 @@ def _ai_agent_plan(goal, spec):
     print(ai_complete("GOAL: " + goal, spec, system=system).strip())
 
 
-def _ai_run(nl, spec, yes):
+def _ai_run(nl, spec, yes, as_json=False):
     """Translate a natural-language request into one SysAdminToolbox command and run it."""
     system = ("Translate the request into ONE SysAdminToolbox command, using this reference:\n"
               + _AI_CMD_REFERENCE +
@@ -7947,19 +7947,27 @@ def _ai_run(nl, spec, yes):
         parts = shlex.split(line)
     except ValueError:
         parts = line.split()
-    print("[ai] proposed: SysAdminToolbox " + line, file=sys.stderr)
+    if not as_json:
+        print("[ai] proposed: SysAdminToolbox " + line, file=sys.stderr)
     if not yes and sys.stdin.isatty():
         try:
             if input("[ai] Run it? [y/N] ").strip().lower() not in ("y", "yes"):
-                print("[ai] Not run.", file=sys.stderr)
+                if as_json:
+                    print(json.dumps({"command": line, "ran": False}, indent=2))
+                else:
+                    print("[ai] Not run.", file=sys.stderr)
                 return
         except (EOFError, KeyboardInterrupt):
             return
     ok, out = _ai_tool_run(parts[0], parts[1:]) if parts else (False, "empty command")
-    print(out)
+    if as_json:
+        print(json.dumps({"command": line, "ran": True, "ok": ok,
+                          "output": _ai_maybe_json(out)}, indent=2))
+    else:
+        print(out)
 
 
-def _ai_diagnose(target, symptom, spec):
+def _ai_diagnose(target, symptom, spec, as_json=False):
     """Run a fixed battery of read-only checks on a target, then narrate the result."""
     checks = [
         ("net", ["dns", target]),
@@ -7969,17 +7977,27 @@ def _ai_diagnose(target, symptom, spec):
         ("net", ["traceroute-asn", target]),
     ]
     collected = []
+    results = []
     for group, args in checks:
         line = group + " " + " ".join(args)
-        print("[diagnose] SysAdminToolbox " + line, file=sys.stderr)
+        if not as_json:
+            print("[diagnose] SysAdminToolbox " + line, file=sys.stderr)
         ok, out = _ai_tool_run(group, args)
         collected.append("### %s (%s)\n%s" % (line, "ok" if ok else "error", out))
+        results.append({"command": line, "ok": ok, "output": _ai_maybe_json(out)})
     prompt = ("You are a network diagnostician. Below are read-only SysAdminToolbox results for '"
               + target + "'"
               + ((" (reported symptom: " + symptom + ")") if symptom else "")
               + ". Give a concise root-cause assessment and concrete next steps.\n\n"
               + "\n\n".join(collected))
-    print(ai_complete(prompt, spec).strip())
+    assessment = ai_complete(prompt, spec).strip()
+    if as_json:
+        report = {"target": target, "checks": results, "assessment": assessment}
+        if symptom:
+            report["symptom"] = symptom
+        print(json.dumps(report, indent=2))
+    else:
+        print(assessment)
 
 
 def _dispatch_ai(args):
@@ -8007,9 +8025,9 @@ def _dispatch_ai(args):
         else:
             _ai_agent(text, args.provider, getattr(args, "max_steps", 8), as_json=is_json_mode())
     elif op == "run":
-        _ai_run(text, args.provider, yes)
+        _ai_run(text, args.provider, yes, as_json=is_json_mode())
     elif op == "diagnose":
-        _ai_diagnose(text.split()[0], getattr(args, "symptom", None), args.provider)
+        _ai_diagnose(text.split()[0], getattr(args, "symptom", None), args.provider, as_json=is_json_mode())
     else:  # ask / explain / suggest
         answer = ai_complete(_ai_build_prompt(op, text), args.provider)
         if is_json_mode():
