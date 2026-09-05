@@ -97,6 +97,60 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(out, "forced answer")
 
 
+class MaybeJsonTests(unittest.TestCase):
+    def test_parses_json_object(self):
+        self.assertEqual(sat._ai_maybe_json('{"hosts": 254}'), {"hosts": 254})
+
+    def test_passes_through_non_json(self):
+        self.assertEqual(sat._ai_maybe_json("not json"), "not json")
+
+
+class AgentJsonTests(unittest.TestCase):
+    def test_json_report_structure(self):
+        seq = ['{"tool":"subnet","args":["calc","10.0.0.0/24"],"why":"need hosts"}',
+               '{"final":"1022 usable hosts"}']
+        calls = []
+
+        def fake(prompt, spec="auto", system=None):
+            calls.append(prompt)
+            return seq[len(calls) - 1]
+
+        with patch.object(sat, "ai_complete", side_effect=fake), \
+                patch.object(sat, "_ai_tool_run", return_value=(True, '{"usable_hosts":1022}')):
+            out = _cap(sat._ai_agent, "how many hosts", "ollama", 8, True)
+        report = json.loads(out)
+        self.assertEqual(report["goal"], "how many hosts")
+        self.assertTrue(report["completed"])
+        self.assertEqual(report["conclusion"], "1022 usable hosts")
+        self.assertEqual(len(report["steps"]), 1)
+        step = report["steps"][0]
+        self.assertEqual(step["command"], "subnet calc 10.0.0.0/24")
+        self.assertEqual(step["why"], "need hosts")
+        self.assertTrue(step["ok"])
+        self.assertEqual(step["output"], {"usable_hosts": 1022})
+
+    def test_json_budget_exhausted_marks_incomplete(self):
+        it = iter(['{"tool":"subnet","args":["calc","10.0.0.0/24"]}',
+                   '{"tool":"subnet","args":["calc","10.0.0.0/24"]}',
+                   '{"final":"forced"}'])
+        with patch.object(sat, "ai_complete", side_effect=lambda *a, **k: next(it, '{"final":"forced"}')), \
+                patch.object(sat, "_ai_tool_run", return_value=(True, "{}")):
+            out = _cap(sat._ai_agent, "goal", "ollama", 2, True)
+        report = json.loads(out)
+        self.assertFalse(report["completed"])
+        self.assertEqual(report["conclusion"], "forced")
+        self.assertEqual(len(report["steps"]), 2)
+        self.assertIn("note", report)
+
+    def test_json_no_action_marks_incomplete(self):
+        with patch.object(sat, "ai_complete", return_value="I cannot help"):
+            out = _cap(sat._ai_agent, "goal", "ollama", 3, True)
+        report = json.loads(out)
+        self.assertFalse(report["completed"])
+        self.assertEqual(report["steps"], [])
+        self.assertIn("cannot", report["conclusion"])
+
+
 class RunAndDiagnoseTests(unittest.TestCase):
     def test_run_executes_proposed_command(self):
         with patch.object(sat, "ai_complete", return_value="subnet calc 10.0.0.0/24"), \
