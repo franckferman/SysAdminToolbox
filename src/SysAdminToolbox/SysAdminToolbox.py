@@ -7102,7 +7102,7 @@ def _dispatch_mac(args):
             print(f"  Unicast    : {info['is_unicast']}")
             print(f"  Multicast  : {info['is_multicast']}")
             print(f"  Local (LAA): {info['is_local']}")
-            print(f"  Formats:")
+            print("  Formats:")
             for style, v in info['all_formats'].items():
                 print(f"    {style:5s}: {v}")
     elif op == "format":
@@ -7441,7 +7441,7 @@ def _dispatch_net(args):
                 print(f"  {target}: {result['error']}")
             else:
                 print(f"  {target} [{result.get('status_code', '?')}]")
-                print(f"  Security headers:")
+                print("  Security headers:")
                 for name, info in result.get('security_headers', {}).items():
                     mark = "+" if info['present'] else "-"
                     val = f" ({info['value'][:50]})" if info['value'] else ""
