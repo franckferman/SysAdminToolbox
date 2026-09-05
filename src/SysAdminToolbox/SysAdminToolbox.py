@@ -7802,16 +7802,17 @@ _AI_CMD_REFERENCE = (
 def _ai_extract_json(text: str):
     """Best-effort extraction of a single JSON object from model text."""
     text = re.sub(r"```(?:json)?", "", text or "").strip()
-    for candidate in (text, (re.search(r"\{.*\}", text, re.DOTALL) or [None]).__getitem__(0)
-                      if re.search(r"\{.*\}", text, re.DOTALL) else None):
-        if not candidate:
-            continue
+    candidates = [text]
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        candidates.append(match.group(0))
+    for candidate in candidates:
         try:
             obj = json.loads(candidate)
-            if isinstance(obj, dict):
-                return obj
         except (json.JSONDecodeError, TypeError):
-            pass
+            continue
+        if isinstance(obj, dict):
+            return obj
     return {}
 
 
