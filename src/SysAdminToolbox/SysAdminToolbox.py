@@ -7772,8 +7772,9 @@ def _ai_build_prompt(op: str, text: str) -> str:
         return ("Explain the following network diagnostic or CLI output for a sysadmin, "
                 "concisely and in plain language:\n\n" + text)
     if op == "suggest":
-        return ("Give the single best SysAdminToolbox command line for this request. "
-                "Output only the command, no prose.\nRequest: " + text)
+        return ("Given this SysAdminToolbox command reference:\n" + _AI_CMD_REFERENCE +
+                "\nGive the single best command line for the request. Output ONLY the command, "
+                "without the 'SysAdminToolbox' prefix and without prose.\nRequest: " + text)
     return text  # ask
 
 
@@ -7783,16 +7784,18 @@ def _ai_build_prompt(op: str, text: str) -> str:
 # Command groups the AI may run as tools (read-only; ai/web are never exposed).
 _AI_AGENT_TOOLS = {"convert", "subnet", "ipv6", "mac", "net", "doctor", "vendor", "cheat"}
 
-_AI_TOOL_CATALOG = (
-    "- convert: base/address conversions (ipinfo, ipclass, m2c, c2m, ...)\n"
-    "- subnet: subnetting (calc, adv, vlsm, range, contains, exclude, overlap, supernet, audit)\n"
-    "- ipv6: IPv6 utilities (expand, compress, type, subnet, ula)\n"
-    "- mac: MAC utilities (info, format, vendor, generate)\n"
-    "- net: diagnostics (ping, dns, dns-type, dns-compare, certcheck, cert-audit, dns-health,\n"
-    "       headers, traceroute-asn, rdns, whois, portscan)\n"
-    "- doctor: read-only host checks (system, service, disk, network, firewall, nginx)\n"
-    "- vendor: generate vlan/acl config\n"
-    "- cheat: reference cheatsheets\n"
+_AI_CMD_REFERENCE = (
+    "convert <op> <value>   ops: d2b b2d d2h h2d iptobin bintoip m2c c2m m2w w2m a2b b2a ipinfo ipclass\n"
+    "subnet calc <IP/CIDR> | subnet adv <IP/CIDR> <new-prefix> | subnet vlsm <IP/CIDR> <hosts...>\n"
+    "subnet range <ip1> <ip2> | subnet contains <net> <ip> | subnet exclude <net> <subnet>\n"
+    "subnet overlap <a> <b> | subnet supernet <a> <b> | subnet audit <net...>\n"
+    "ipv6 <op> <value>   ops: expand compress tobin type subnet ula\n"
+    "mac info|normalize|vendor <mac> | mac format <mac> <colon|dash|cisco|bare> | mac generate <count> <style>\n"
+    "net <op> <target>   ops: ping dns dns-type certcheck cert-audit dns-health headers traceroute-asn rdns whois portscan\n"
+    "net dns-compare <domain> <resolver1> <resolver2>\n"
+    "doctor <check> [target]   checks: system service disk network firewall nginx\n"
+    "vendor vlan <cisco|juniper|huawei> <id> <name> [ports...] | vendor acl <platform> <name> <permit|deny> <proto> <src> <dst>\n"
+    "cheat <topic>   topics: vlan acl firewall routing nat huawei mikrotik\n"
 )
 
 
@@ -7845,7 +7848,7 @@ def _ai_confirm_cloud(provider, model, digest, yes, extra=""):
 _AI_AGENT_SYSTEM = (
     "You are a read-only network troubleshooting agent driving a CLI called SysAdminToolbox. "
     "Solve the user's goal by calling its commands as tools and reading their JSON output.\n"
-    "Available tool groups and operations:\n" + _AI_TOOL_CATALOG +
+    "Available commands (use one op per step):\n" + _AI_CMD_REFERENCE +
     "\nProtocol: reply with ONE JSON object and nothing else.\n"
     '  to run a command:  {"tool": "<group>", "args": ["<op>", "<arg>", ...], "why": "<short reason>"}\n'
     '  when finished:     {"final": "<diagnosis and concrete next steps>"}\n'
@@ -7883,7 +7886,7 @@ def _ai_agent(goal, spec, max_steps):
 def _ai_agent_plan(goal, spec):
     """--dry-run: print the ordered plan the agent would run, without executing anything."""
     system = ("You are a network troubleshooting planner for SysAdminToolbox (read-only). "
-              "Available tools:\n" + _AI_TOOL_CATALOG +
+              "Available commands:\n" + _AI_CMD_REFERENCE +
               "\nGiven the goal, output an ordered, numbered plan of SysAdminToolbox commands you "
               "would run, each with a one-line reason. Do not execute anything.")
     print(ai_complete("GOAL: " + goal, spec, system=system).strip())
@@ -7891,9 +7894,9 @@ def _ai_agent_plan(goal, spec):
 
 def _ai_run(nl, spec, yes):
     """Translate a natural-language request into one SysAdminToolbox command and run it."""
-    system = ("Translate the request into a single SysAdminToolbox command line. "
-              "Output ONLY the command, without the 'SysAdminToolbox' prefix and without prose. "
-              "Allowed groups: convert, subnet, ipv6, mac, net, doctor, vendor, cheat.")
+    system = ("Translate the request into ONE SysAdminToolbox command, using this reference:\n"
+              + _AI_CMD_REFERENCE +
+              "\nOutput ONLY the command, without the 'SysAdminToolbox' prefix and without prose.")
     raw = ai_complete("Request: " + nl, spec, system=system).strip()
     line = re.sub(r"```", "", raw).strip().splitlines()[0].strip() if raw else ""
     line = re.sub(r"^\$?\s*SysAdminToolbox\s+", "", line).strip()
