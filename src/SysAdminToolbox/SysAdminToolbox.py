@@ -7856,31 +7856,71 @@ _AI_AGENT_SYSTEM = (
 )
 
 
-def _ai_agent(goal, spec, max_steps):
-    """Autonomous tool-use loop: the model runs read-only commands until it can conclude."""
+def _ai_maybe_json(text):
+    """Return parsed JSON when text is a JSON document, else the raw string.
+
+    Lets `ai agent --json` embed each command's structured output instead of an
+    opaque escaped blob.
+    """
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return text
+
+
+def _ai_agent(goal, spec, max_steps, as_json=False):
+    """Autonomous tool-use loop: the model runs read-only commands until it can conclude.
+
+    With as_json, collect the goal, every step (command, reason, ok, output) and
+    the conclusion into one JSON object printed at the end, instead of streaming
+    progress to stderr.
+    """
     max_steps = max(1, min(int(max_steps or 8), 15))
     transcript = "GOAL: " + goal + "\n"
+    steps = []
+
+    def _report(conclusion, completed, note=None):
+        report = {"goal": goal, "steps": steps,
+                  "conclusion": conclusion, "completed": completed}
+        if note:
+            report["note"] = note
+        print(json.dumps(report, indent=2))
+
     for step in range(1, max_steps + 1):
         raw = ai_complete(transcript + "\nWhat is your next JSON action?", spec, system=_AI_AGENT_SYSTEM)
         action = _ai_extract_json(raw)
         if action.get("final"):
-            print(action["final"] if isinstance(action["final"], str) else json.dumps(action["final"]))
+            final = action["final"]
+            if as_json:
+                _report(final, True)
+            else:
+                print(final if isinstance(final, str) else json.dumps(final))
             return
         group = action.get("tool", "")
         args = action.get("args", []) or []
         if not group:
-            print("[agent] no actionable step returned; stopping.", file=sys.stderr)
-            print(raw.strip())
+            if as_json:
+                _report(raw.strip(), False, note="no actionable step returned")
+            else:
+                print("[agent] no actionable step returned; stopping.", file=sys.stderr)
+                print(raw.strip())
             return
         line = (str(group) + " " + " ".join(str(a) for a in args)).strip()
-        print("[agent] step %d: SysAdminToolbox %s  (%s)"
-              % (step, line, action.get("why", "")), file=sys.stderr)
+        if not as_json:
+            print("[agent] step %d: SysAdminToolbox %s  (%s)"
+                  % (step, line, action.get("why", "")), file=sys.stderr)
         ok, out = _ai_tool_run(group, args)
+        steps.append({"step": step, "command": line, "why": action.get("why", ""),
+                      "ok": ok, "output": _ai_maybe_json(out)})
         transcript += "\nSTEP %d: `%s` -> %s\n%s\n" % (step, line, "ok" if ok else "ERROR", out)
     raw = ai_complete(transcript + "\nStep budget reached. Reply now with {\"final\": ...}.",
                       spec, system=_AI_AGENT_SYSTEM)
     action = _ai_extract_json(raw)
-    print(action.get("final") or raw.strip())
+    final = action.get("final") or raw.strip()
+    if as_json:
+        _report(final, False, note="step budget reached")
+    else:
+        print(final)
 
 
 def _ai_agent_plan(goal, spec):
@@ -7964,7 +8004,7 @@ def _dispatch_ai(args):
         if getattr(args, "dry_run", False):
             _ai_agent_plan(text, args.provider)
         else:
-            _ai_agent(text, args.provider, getattr(args, "max_steps", 8))
+            _ai_agent(text, args.provider, getattr(args, "max_steps", 8), as_json=is_json_mode())
     elif op == "run":
         _ai_run(text, args.provider, yes)
     elif op == "diagnose":
